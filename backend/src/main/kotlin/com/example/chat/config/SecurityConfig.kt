@@ -35,9 +35,19 @@ import org.springframework.security.web.authentication.AnonymousAuthenticationFi
  * — every request re-authenticates from its `X-User-Id` header, consistent
  * with CSRF being inapplicable to this session-less API.
  *
- * A later work package (WP4) adds a WebSocket handshake interceptor that
- * reuses the same [UserIdentityService] for the `?userId=` query parameter;
- * extend this class rather than scattering security config elsewhere.
+ * WP4 adds the WebSocket handshake interceptor
+ * (`com.example.chat.ws.UserIdHandshakeInterceptor`) that reuses the same
+ * [UserIdentityService] for the `?userId=` query parameter -- but the
+ * handshake itself is a plain HTTP GET with an `Upgrade` header, which still
+ * passes through this same servlet filter chain first. The browser-native
+ * WebSocket API cannot set the `X-User-Id` header the way REST calls do, so
+ * [UserIdHeaderAuthenticationFilter] would never authenticate it, and the
+ * blanket `authenticated()` rule below would reject every handshake with a
+ * `401` before it ever reached the handshake interceptor. The WebSocket
+ * upgrade path is therefore left `permitAll` below -- handshake-time
+ * identity validation is performed entirely by the handshake interceptor
+ * itself (against the exact same seeded-user check), not by this filter
+ * chain.
  */
 @Configuration
 class SecurityConfig(
@@ -54,6 +64,10 @@ class SecurityConfig(
                 authorize("/actuator/health", permitAll)
                 authorize("/actuator/info", permitAll)
                 authorize(HttpMethod.GET, "/api/users", permitAll)
+                // See class doc: the WS handshake can't carry X-User-Id, so
+                // it must bypass this filter chain's authentication rule;
+                // UserIdHandshakeInterceptor is the real gatekeeper here.
+                authorize("/ws/**", permitAll)
                 authorize(anyRequest, authenticated)
             }
             exceptionHandling {

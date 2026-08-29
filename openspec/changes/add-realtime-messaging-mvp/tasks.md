@@ -24,15 +24,15 @@
 
 ## 4. Realtime protocol & connection layer (realtime-messaging)
 
-- [ ] 4.1 Define Kotlin sealed types for inbound `SEND_MESSAGE` and outbound `MESSAGE_ACK` / `NEW_MESSAGE` / `ERROR`, with Jackson (de)serialization on the `type` discriminator.
-- [ ] 4.2 Validate the handshake `userId` query parameter against configured users, bind it as the connection identity, and make the handler derive sender identity only from that binding.
-- [ ] 4.3 Implement `WebSocketConnectionHandler` (TextWebSocketHandler): register connections on open and remove them on close/error.
-- [ ] 4.4 Implement `ConnectionRegistry` keyed by userId → set of sessions, tracking multiple sessions independently and serializing concurrent sends per session.
-- [ ] 4.5 Implement `ProtocolParser` + `MessageCommandHandler`: parse commands, return stable-code protocol `ERROR` events for unsupported/invalid commands without terminating unrelated connections.
-- [ ] 4.6 Implement transactional `MessageService.send`: identify sender from the connection, validate content (non-empty, within the configured maximum length), verify conversation existence/participation, generate authoritative id + timestamp, and return success only after commit.
-- [ ] 4.7 After commit, send `MESSAGE_ACK` with the authoritative message to the origin and `NEW_MESSAGE` to every other active participant connection (including the sender's other sessions); isolate failed session sends and persist when recipients are offline.
-- [ ] 4.8 On validation or persistence failure, emit a correlated `ERROR` where possible and never emit a success event.
-- [ ] 4.9 Enforce race-safe idempotency: matching duplicate commands re-ack the existing message without re-broadcast; conflicting reuse returns `CLIENT_MESSAGE_ID_CONFLICT`; concurrent duplicates create exactly one row.
+- [x] 4.1 Define Kotlin sealed types for inbound `SEND_MESSAGE` and outbound `MESSAGE_ACK` / `NEW_MESSAGE` / `ERROR`, with Jackson (de)serialization on the `type` discriminator.
+- [x] 4.2 Validate the handshake `userId` query parameter against configured users, bind it as the connection identity, and make the handler derive sender identity only from that binding.
+- [x] 4.3 Implement `WebSocketConnectionHandler` (TextWebSocketHandler): register connections on open and remove them on close/error.
+- [x] 4.4 Implement `ConnectionRegistry` keyed by userId → set of sessions, tracking multiple sessions independently and serializing concurrent sends per session.
+- [x] 4.5 Implement `ProtocolParser` + `MessageCommandHandler`: parse commands, return stable-code protocol `ERROR` events for unsupported/invalid commands without terminating unrelated connections.
+- [x] 4.6 Implement transactional `MessageService.send`: identify sender from the connection, validate content (non-empty, within the configured maximum length), verify conversation existence/participation, generate authoritative id + timestamp, and return success only after commit.
+- [x] 4.7 After commit, send `MESSAGE_ACK` with the authoritative message to the origin and `NEW_MESSAGE` to every other active participant connection (including the sender's other sessions); isolate failed session sends and persist when recipients are offline.
+- [x] 4.8 On validation or persistence failure, emit a correlated `ERROR` where possible and never emit a success event.
+- [x] 4.9 Enforce race-safe idempotency: matching duplicate commands re-ack the existing message without re-broadcast; conflicting reuse returns `CLIENT_MESSAGE_ID_CONFLICT`; concurrent duplicates create exactly one row.
 
 ## 5. Frontend — REST & identity (user-directory, conversations)
 
