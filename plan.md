@@ -1,0 +1,438 @@
+# Real-Time Private Messaging MVP
+
+You are implementing a Senior Full Stack Engineer take-home assessment.
+
+Build a working full-stack real-time messaging application for 1-to-1 private messaging between users.
+
+The application must run completely locally using Docker Compose and must not depend on external SaaS services.
+
+The goal is:
+
+1. Start the application with Docker Compose
+2. Open the application in two browser windows
+3. Use two different users
+4. Open a conversation between them
+5. Send a message
+6. Persist the message
+7. Deliver it to the recipient in real time using WebSocket
+8. Display the message immediately for both users
+9. Reload either browser and retain message history
+
+Do NOT implement RabbitMQ, Redis, horizontal scaling, STOMP, presence, read receipts, typing indicators, file uploads, or other production extensions
+
+Prefer simple, explicit code over unnecessary abstraction.
+
+---
+
+# Design
+
+## Architecture
+
+Use two communication paths:
+
+### REST
+
+REST is used for queryable and historical server state:
+
+- users
+- conversations
+- message history
+
+### WebSocket
+
+WebSocket is used for real-time events:
+
+- sending messages
+- receiving newly created messages
+- receiving acknowledgements/errors
+
+PostgreSQL is the durable source of truth.
+
+The backend owns all authoritative message creation.
+
+The frontend MUST NOT treat a locally created message as authoritative until the server acknowledges it.
+
+
+## Frontend
+
+### React
+
+Use React for the web UI.
+
+Why:
+
+- Component-based UI model fits conversations and message lists well.
+- Mature TypeScript ecosystem.
+- Keeps UI implementation independent from the backend architecture.
+- This is infrastructure rather than the core messaging implementation.
+
+### TypeScript
+
+Use TypeScript for all frontend application code.
+
+Why:
+
+- Explicitly models the WebSocket protocol.
+- Allows client/server event types to be reasoned about clearly.
+- Makes invalid protocol states harder to introduce.
+
+### TanStack Query
+
+Use TanStack Query for REST-based server state.
+
+Use it for:
+
+- users
+- conversations
+- historical messages
+
+Do NOT use TanStack Query as the WebSocket transport.
+
+WebSocket events may update or invalidate TanStack Query caches where appropriate.
+
+### Native WebSocket API
+
+Use the browser's native WebSocket API.
+
+Do NOT use STOMP or a messaging framework on the frontend.
+
+Why:
+
+- WebSocket is the core real-time transport primitive.
+- The application protocol should be visible and implemented by us.
+- This makes message routing, acknowledgements and failure behaviour explicit.
+
+Create a small WebSocket client module responsible for:
+
+- opening the connection
+- serializing outgoing commands
+- parsing incoming events
+- dispatching events to application code
+- reconnecting after an unexpected disconnect
+- cleaning up connections
+
+Do not hide WebSocket behaviour inside React components.
+
+## Backend
+
+### Kotlin
+
+Use Kotlin as the backend language.
+
+Why:
+
+- Strong type system.
+- Concise domain modelling.
+- Excellent interoperability with Spring Boot.
+- Sealed classes/data classes are useful for modelling protocol messages explicitly.
+
+### Spring Boot
+
+Use Spring Boot as the application foundation.
+
+Why:
+
+- Provides HTTP, dependency injection, configuration and application lifecycle plumbing.
+- These are supporting concerns rather than the core messaging problem.
+
+Do NOT use a library/framework that implements the messaging product for us.
+
+### Spring MVC
+
+Use Spring MVC for REST endpoints.
+
+Why:
+
+- The REST workload is conventional request/response traffic.
+- Reactive programming is unnecessary for the MVP.
+- Keeping the programming model simple makes the realtime implementation easier to reason about.
+
+### Spring WebSocket
+
+Use Spring WebSocket only as the WebSocket transport abstraction.
+
+Do NOT use:
+
+- STOMP
+- Spring Messaging broker functionality
+- RabbitMQ
+- Redis Pub/Sub
+
+Implement the application-level realtime protocol ourselves.
+
+### Spring Security
+
+Use minimal Spring Security configuration.
+
+Authentication for Day 1 may deliberately be simple.
+
+The system needs to know which application user owns each HTTP/WebSocket session.
+
+Do not spend significant Day 1 time implementing OAuth, OIDC, JWT infrastructure, or an external identity provider.
+
+### Jackson
+
+Use Jackson for JSON serialization/deserialization.
+
+Model WebSocket messages as explicit Kotlin types.
+
+### JPA / Hibernate
+
+Use JPA/Hibernate for persistence.
+
+Persistence is supporting infrastructure rather than the core technical exercise.
+
+Do not create unnecessarily complex repository abstractions.
+
+## Database
+
+### PostgreSQL
+
+Use PostgreSQL as the durable source of truth.
+
+At minimum model:
+
+#### User
+
+- id
+- displayName
+
+#### Conversation
+
+- id
+- participants
+
+#### Message
+
+- id
+- conversationId
+- senderId
+- content
+- createdAt
+
+Prefer UUIDs for externally visible identifiers.
+
+Message timestamps MUST be generated by the backend.
+
+## Realtime Architecture
+
+Implement a small realtime layer owned by the application.
+
+Suggested responsibilities:
+
+```text
+WebSocketConnectionHandler
+        |
+        v
+ProtocolParser
+        |
+        v
+MessageCommandHandler
+        |
+        +----> MessageService
+        |          |
+        |          v
+        |      PostgreSQL
+        |
+        v
+ConnectionRegistry
+        |
+        v
+recipient WebSocket session
+```
+
+---
+
+# Requirements
+
+## frontend
+
+WHEN the application loads,
+THE SYSTEM SHALL display the available users.
+
+WHEN a user selects an identity,
+THE SYSTEM SHALL establish that user as the current application user.
+
+WHEN the current user is established,
+THE SYSTEM SHALL display conversations available to that user.
+
+WHEN the user selects a conversation,
+THE SYSTEM SHALL retrieve and display the conversation's message history.
+
+WHEN message history is displayed,
+THE SYSTEM SHALL order messages chronologically.
+
+WHEN the current user is established,
+THE SYSTEM SHALL establish a WebSocket connection to the backend.
+
+WHEN the WebSocket connection is established,
+THE SYSTEM SHALL associate realtime events with the current user.
+
+WHEN the user enters a non-empty message and submits it,
+THE SYSTEM SHALL send the message to the backend.
+
+WHEN the user submits a message,
+THE SYSTEM SHALL display the message as pending until the backend confirms it.
+
+WHEN the backend confirms a submitted message,
+THE SYSTEM SHALL mark the pending message as successfully sent.
+
+IF the backend rejects a submitted message,
+THEN THE SYSTEM SHALL mark the message as failed.
+
+IF the user enters an empty or whitespace-only message,
+THEN THE SYSTEM SHALL prevent the message from being submitted.
+
+WHEN the backend sends a new-message event for the active conversation,
+THE SYSTEM SHALL display the message without requiring a page refresh.
+
+WHEN the backend sends a new-message event for another conversation,
+THE SYSTEM SHALL update the relevant conversation state without changing the user's active conversation.
+
+WHEN the user reloads the page,
+THE SYSTEM SHALL retrieve previously persisted messages from the backend.
+
+IF the WebSocket connection is unexpectedly lost,
+THEN THE SYSTEM SHALL attempt to reconnect.
+
+WHILE the WebSocket connection is unavailable,
+THE SYSTEM SHALL indicate that realtime messaging is temporarily unavailable.
+
+## backend
+
+WHEN a client requests the available users,
+THE SYSTEM SHALL return the users configured for the MVP.
+
+WHEN an authenticated user requests their conversations,
+THE SYSTEM SHALL return only conversations in which that user participates.
+
+WHEN an authenticated user requests the message history of a conversation,
+THE SYSTEM SHALL verify that the user participates in that conversation.
+
+IF a user requests a conversation in which they do not participate,
+THEN THE SYSTEM SHALL reject the request.
+
+WHEN an authorized user requests conversation history,
+THE SYSTEM SHALL return persisted messages in deterministic chronological order.
+
+WHEN a WebSocket connection is established,
+THE SYSTEM SHALL associate the connection with an application user.
+
+WHEN a WebSocket connection is established,
+THE SYSTEM SHALL register the connection as active.
+
+WHEN a WebSocket connection closes,
+THE SYSTEM SHALL remove the connection from the active connection registry.
+
+WHEN the same user establishes multiple WebSocket connections,
+THE SYSTEM SHALL track each connection independently.
+
+WHEN the backend receives a SEND_MESSAGE command,
+THE SYSTEM SHALL identify the sender using the authenticated session.
+
+THE SYSTEM SHALL NOT trust a sender identifier supplied by the client.
+
+WHEN the backend receives a SEND_MESSAGE command,
+THE SYSTEM SHALL validate the message content.
+
+IF the message content is empty or whitespace-only,
+THEN THE SYSTEM SHALL reject the command.
+
+WHEN the backend receives a SEND_MESSAGE command,
+THE SYSTEM SHALL verify that the sender participates in the referenced conversation.
+
+IF the sender does not participate in the referenced conversation,
+THEN THE SYSTEM SHALL reject the command.
+
+IF the referenced conversation does not exist,
+THEN THE SYSTEM SHALL reject the command.
+
+WHEN a valid message is accepted,
+THE SYSTEM SHALL generate the authoritative message identifier.
+
+WHEN a valid message is accepted,
+THE SYSTEM SHALL generate the authoritative creation timestamp.
+
+WHEN a valid message is accepted,
+THE SYSTEM SHALL persist the message before reporting it as successfully created.
+
+WHEN message persistence succeeds,
+THE SYSTEM SHALL send a confirmation to the originating WebSocket connection.
+
+WHEN message persistence succeeds,
+THE SYSTEM SHALL send a new-message event to active connections belonging to the conversation participants.
+
+IF the recipient has no active WebSocket connection,
+THEN THE SYSTEM SHALL still persist the message successfully.
+
+IF message persistence fails,
+THEN THE SYSTEM SHALL NOT report the message as successfully sent.
+
+IF message persistence fails,
+THEN THE SYSTEM SHALL return an error to the originating connection.
+
+IF the backend receives an unsupported WebSocket command,
+THEN THE SYSTEM SHALL return a protocol error.
+
+IF one WebSocket command is invalid,
+THEN THE SYSTEM SHALL reject that command without terminating unrelated WebSocket connections.
+
+
+## postgress
+
+WHEN a valid message is accepted,
+THE SYSTEM SHALL persist the message before acknowledging successful creation.
+
+WHEN a message is persisted,
+THE SYSTEM SHALL store its unique identifier.
+
+WHEN a message is persisted,
+THE SYSTEM SHALL store its conversation identifier.
+
+WHEN a message is persisted,
+THE SYSTEM SHALL store its sender identifier.
+
+WHEN a message is persisted,
+THE SYSTEM SHALL store its content.
+
+WHEN a message is persisted,
+THE SYSTEM SHALL store its server-generated creation timestamp.
+
+WHEN the backend application restarts,
+THE SYSTEM SHALL retain previously persisted messages.
+
+WHEN a conversation's message history is requested after an application restart,
+THE SYSTEM SHALL return previously persisted messages.
+
+WHEN multiple messages belong to the same conversation,
+THE SYSTEM SHALL support retrieving them in deterministic chronological order.
+
+WHEN a message references a conversation,
+THE SYSTEM SHALL maintain referential integrity between the message and conversation.
+
+WHEN a conversation references users,
+THE SYSTEM SHALL maintain referential integrity between the conversation and its participants.
+
+IF persistence of a message fails,
+THEN THE SYSTEM SHALL leave the message in a state that is not reported to clients as successfully created.
+
+## additional
+
+WHEN two messages have the same creation timestamp,
+
+THE SYSTEM SHALL use a deterministic secondary ordering criterion.
+
+WHEN a user has multiple active browser sessions,
+
+THE SYSTEM SHALL deliver realtime events to each active session.
+
+IF a user disconnects before receiving a realtime message,
+
+THEN THE SYSTEM SHALL allow the message to be recovered later through conversation history.
+
+WHEN the server receives a message,
+
+THE SYSTEM SHALL derive the sender identity from the authenticated connection rather than message payload data.
+
+IF the same SEND_MESSAGE command is delivered more than once,
+THEN THE SYSTEM SHALL create at most one logical message.
