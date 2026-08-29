@@ -1,0 +1,7 @@
+# Root-only: the design-system reference dump, not skill reference material.
+# Must stay anchored with a leading slash — an unanchored `references/` also
+# matches .agents/skills/*/references/, which would silently strip the
+# supporting material out of nine skills on clone.
+/references/
+
+.DS_Store
