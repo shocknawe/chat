@@ -390,7 +390,7 @@ body::before {
   margin: 0;
 }
 
-/* ---------- App shell (post-selection placeholder) ---------- */
+/* ---------- App shell (chat layout) ---------- */
 
 .shell {
   flex: 1;
@@ -439,21 +439,151 @@ body::before {
 .shell-body {
   flex: 1;
   display: grid;
-  place-items: center;
-  padding: 34px 18px;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px;
+  align-items: stretch;
 }
 
-.shell-empty {
-  width: min(560px, 100%);
-  text-align: center;
+/* ---------- Conversation rail ---------- */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  overflow-y: auto;
 }
 
-.shell-empty .display {
-  margin: 0 0 9px;
-}
-
-.shell-empty .meta {
+.rail-title {
   margin: 0;
+  padding: 0 6px;
+}
+
+.rail-status {
+  margin: 0;
+  padding: 0 6px;
+}
+
+.conversation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.conversation-tile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 64px;
+  padding: 14px 18px;
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-md);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.2s var(--ease),
+    border-color 0.2s var(--ease),
+    transform 0.3s var(--ease);
+}
+
+.conversation-tile:hover {
+  background: var(--surface-solid);
+  border-color: var(--stroke-strong);
+  transform: translateY(-2px);
+}
+
+.conversation-tile:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--chip);
+  border-color: var(--brand);
+}
+
+.conversation-tile--active {
+  background: var(--nav-active);
+  border-color: var(--stroke-strong);
+}
+
+.conversation-name {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.conversation-skeleton {
+  height: 64px;
+  border-radius: var(--r-md);
+  background: var(--chip);
+  border: 1px solid var(--stroke);
+  animation: skeleton-pulse 1.4s var(--ease) infinite;
+}
+
+.rail-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 0 6px;
+}
+
+.rail-error-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.rail-error-detail {
+  margin: 0;
+}
+
+.rail-retry {
+  height: 44px;
+  padding: 0 20px;
+}
+
+/* ---------- Thread pane (placeholder until task 5.3) ---------- */
+
+.thread-pane {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  text-align: center;
+  padding: 34px 26px;
+}
+
+.thread-pane .title {
+  margin: 0;
+}
+
+.thread-pane .meta {
+  margin: 0;
+}
+
+/* Narrow viewports: rail stacks above the thread. */
+@media (max-width: 720px) {
+  .shell-body {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ---------- Reduced motion: resolve to end states ---------- */
@@ -463,13 +593,15 @@ body::before {
     animation: none;
   }
 
-  .identity-skeleton {
+  .identity-skeleton,
+  .conversation-skeleton {
     animation: none;
     opacity: 0.6;
   }
 
   .btn,
   .identity-tile,
+  .conversation-tile,
   body {
     transition: none;
   }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchUsers, type User } from './api'
+import { fetchConversations, fetchUsers, type User } from './api'
 import { clearStoredUserId, readStoredUserId, storeUserId } from './identity'
+import { ConversationList, conversationLabel } from './components/ConversationList'
 import { UserSelectScreen } from './components/UserSelectScreen'
 import { initials } from './initials'
 
@@ -13,8 +14,8 @@ import { initials } from './initials'
  * mount (per-window, survives reload, never shared across windows), then
  * *validated* against the fetched user directory — a stored id that no
  * longer matches a configured user is discarded and the selection screen
- * shows again. Conversation UI lands in task 5.2; until then an established
- * identity renders a minimal shell with a switch-user affordance.
+ * shows again. Once established, the signed-in shell mounts the conversation
+ * rail (task 5.2) and, later, the message thread (tasks 5.3–5.4).
  */
 function App() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(() => readStoredUserId())
@@ -56,7 +57,7 @@ function App() {
     )
   }
 
-  return <SignedInShell user={currentUser} onSwitchUser={handleSwitchUser} />
+  return <SignedInShell key={currentUser.id} user={currentUser} onSwitchUser={handleSwitchUser} />
 }
 
 interface SignedInShellProps {
@@ -65,10 +66,26 @@ interface SignedInShellProps {
 }
 
 /**
- * Minimal placeholder shell rendered once the current user is established.
- * The conversation rail and thread (tasks 5.2–5.4) mount inside this frame.
+ * Chat app frame rendered once the current user is established: a
+ * conversations rail on the left and a thread pane on the right.
+ *
+ * Conversation scoping (task 5.2): the query key includes the user's id, so
+ * "Switch user" naturally re-fetches for the new identity. The shell is also
+ * keyed on `user.id`, so a switch remounts it and the selected conversation
+ * resets — an id from the previous user's list can never leak across.
+ *
+ * The thread pane is an honest placeholder until history lands in task 5.3.
  */
 function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
+  const conversationsQuery = useQuery({
+    queryKey: ['conversations', user.id],
+    queryFn: () => fetchConversations(user.id),
+  })
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
+
+  const selectedConversation =
+    conversationsQuery.data?.find((c) => c.id === selectedConversationId) ?? null
+
   return (
     <div className="shell">
       <header className="app-header">
@@ -89,11 +106,31 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
         </div>
       </header>
       <main className="shell-body">
-        <section className="card shell-empty" aria-labelledby="shell-empty-title">
-          <h1 id="shell-empty-title" className="display">
-            You're in, {user.displayName}.
-          </h1>
-          <p className="meta">Conversations will appear here.</p>
+        <ConversationList
+          currentUserId={user.id}
+          conversations={conversationsQuery.data}
+          isPending={conversationsQuery.isPending}
+          error={conversationsQuery.error}
+          onRetry={() => void conversationsQuery.refetch()}
+          selectedId={selectedConversationId}
+          onSelect={setSelectedConversationId}
+        />
+        <section className="card thread-pane" aria-labelledby="thread-title">
+          {selectedConversation !== null ? (
+            <>
+              <h1 id="thread-title" className="title">
+                {conversationLabel(selectedConversation, user.id)}
+              </h1>
+              <p className="meta">Message history will appear here.</p>
+            </>
+          ) : (
+            <>
+              <h1 id="thread-title" className="title">
+                No conversation selected
+              </h1>
+              <p className="meta">Pick a conversation on the left to start reading.</p>
+            </>
+          )}
         </section>
       </main>
     </div>
