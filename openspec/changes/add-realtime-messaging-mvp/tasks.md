@@ -8,12 +8,12 @@
 
 ## 2. Data model & persistence (message-persistence)
 
-- [ ] 2.1 Define JPA entities: `User(id UUID, displayName)`, `Conversation(id UUID)` with participants join, `Message(id UUID, conversationId FK, senderId FK, clientMessageId UUID, content, createdAt)`; avoid reserved database table names.
-- [ ] 2.2 Add foreign keys enforcing message↔conversation and conversation↔participants referential integrity.
-- [ ] 2.3 Add a unique constraint on `(senderId, clientMessageId)` and repository lookup by that key for database-enforced idempotency.
-- [ ] 2.4 Create `MessageRepository` with history query ordered by `(createdAt ASC, id ASC)` deterministic tiebreak.
-- [ ] 2.5 Idempotently seed fixed-id MVP users and a pre-created conversation between them on startup.
-- [ ] 2.6 Verify persistence survives backend restart and messages are retrievable afterwards (restart-retention).
+- [x] 2.1 Define JPA entities: `User(id UUID, displayName)`, `Conversation(id UUID)` with participants join, `Message(id UUID, conversationId FK, senderId FK, clientMessageId UUID, content, createdAt)`; avoid reserved database table names.
+- [x] 2.2 Add foreign keys enforcing message↔conversation and conversation↔participants referential integrity.
+- [x] 2.3 Add a unique constraint on `(senderId, clientMessageId)` and repository lookup by that key for database-enforced idempotency.
+- [x] 2.4 Create `MessageRepository` with history query ordered by `(createdAt ASC, id ASC)` deterministic tiebreak.
+- [x] 2.5 Idempotently seed fixed-id MVP users and a pre-created conversation between them on startup.
+- [x] 2.6 Verify persistence survives backend restart and messages are retrievable afterwards (restart-retention).
 
 ## 3. REST API (user-directory, conversations)
 
