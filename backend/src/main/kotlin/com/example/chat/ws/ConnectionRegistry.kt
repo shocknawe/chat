@@ -50,7 +50,14 @@ class ConnectionRegistry(private val objectMapper: ObjectMapper) {
     /** Registers [session] (expected to already be a `ConcurrentWebSocketSessionDecorator`) as active for [userId]. */
     fun register(userId: UUID, session: WebSocketSession) {
         sessionsById[session.id] = session
-        sessionsByUser.computeIfAbsent(userId) { ConcurrentHashMap.newKeySet() }.add(session)
+        // The add happens *inside* the compute so a session closing at the
+        // exact instant a new one registers cannot orphan the new session:
+        // compute/replace on one key is serialized, so an unregister racing
+        // here either runs before us (we re-create the set) or after us (it
+        // removes our session -- never silently drops it).
+        sessionsByUser.compute(userId) { _, sessions ->
+            (sessions ?: ConcurrentHashMap.newKeySet()).also { it.add(session) }
+        }
     }
 
     /** Removes [session] from both the per-user and per-session-id indexes. */

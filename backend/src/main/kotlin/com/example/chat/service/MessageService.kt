@@ -113,7 +113,11 @@ class MessageService(
     private fun validateContent(content: String): SendResult.Rejected? = when {
         content.isBlank() ->
             SendResult.Rejected(ErrorCodes.INVALID_CONTENT, "Content must not be empty or whitespace-only")
-        content.length > messagingProperties.maxContentLength ->
+        // Count code points, not UTF-16 code units (`String.length`), so the
+        // limit matches the unit Postgres `varchar(n)` enforces on the
+        // Message.content column -- emoji outside the BMP count as one here,
+        // exactly as the database counts them.
+        content.codePointCount(0, content.length) > messagingProperties.maxContentLength ->
             SendResult.Rejected(
                 ErrorCodes.INVALID_CONTENT,
                 "Content exceeds maximum length of ${messagingProperties.maxContentLength} characters",
