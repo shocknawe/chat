@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchConversations, fetchUsers, type User } from './api'
 import { clearStoredUserId, readStoredUserId, storeUserId } from './identity'
-import { ConversationList, conversationLabel } from './components/ConversationList'
+import { ConversationList } from './components/ConversationList'
+import { ThreadPane } from './components/ThreadPane'
 import { UserSelectScreen } from './components/UserSelectScreen'
 import { initials } from './initials'
 
@@ -74,7 +75,7 @@ interface SignedInShellProps {
  * keyed on `user.id`, so a switch remounts it and the selected conversation
  * resets — an id from the previous user's list can never leak across.
  *
- * The thread pane is an honest placeholder until history lands in task 5.3.
+ * The thread pane (task 5.3) loads and renders history on selection.
  */
 function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
   const conversationsQuery = useQuery({
@@ -115,23 +116,7 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
           selectedId={selectedConversationId}
           onSelect={setSelectedConversationId}
         />
-        <section className="card thread-pane" aria-labelledby="thread-title">
-          {selectedConversation !== null ? (
-            <>
-              <h1 id="thread-title" className="title">
-                {conversationLabel(selectedConversation, user.id)}
-              </h1>
-              <p className="meta">Message history will appear here.</p>
-            </>
-          ) : (
-            <>
-              <h1 id="thread-title" className="title">
-                No conversation selected
-              </h1>
-              <p className="meta">Pick a conversation on the left to start reading.</p>
-            </>
-          )}
-        </section>
+        <ThreadPane currentUser={user} conversation={selectedConversation} />
       </main>
     </div>
   )
