@@ -5,3 +5,7 @@
 /references/
 
 .DS_Store
+
+# Local docker-compose env overrides (see .env.example)
+/.env
+

@@ -1,10 +1,10 @@
 ## 1. Project scaffolding & local runtime
 
-- [ ] 1.1 Create repo layout: `backend/` (Gradle Kotlin + Spring Boot), `frontend/` (Vite + React + TypeScript), root `docker-compose.yml`.
-- [ ] 1.2 Add backend dependencies: Spring Web (MVC), Spring WebSocket, Spring Security, Spring Data JPA, Jackson (Kotlin module), PostgreSQL driver.
-- [ ] 1.3 Add frontend dependencies: React, TypeScript, TanStack Query, and configure a dev server proxy for REST + WebSocket to the backend.
-- [ ] 1.4 Author `docker-compose.yml` with `db` (PostgreSQL + named volume), `backend` (depends_on db healthcheck), `frontend`; verify `docker compose up` starts all three.
-- [ ] 1.5 Configure backend datasource + JPA against the compose Postgres; confirm connectivity on boot.
+- [x] 1.1 Create repo layout: `backend/` (Gradle Kotlin + Spring Boot), `frontend/` (Vite + React + TypeScript), root `docker-compose.yml`.
+- [x] 1.2 Add backend dependencies: Spring Web (MVC), Spring WebSocket, Spring Security, Spring Data JPA, Jackson (Kotlin module), PostgreSQL driver.
+- [x] 1.3 Add frontend dependencies: React, TypeScript, TanStack Query, and configure a dev server proxy for REST + WebSocket to the backend.
+- [x] 1.4 Author `docker-compose.yml` with `db` (PostgreSQL + named volume), `backend` (depends_on db healthcheck), `frontend`; verify `docker compose up` starts all three. — config authored and validated (YAML structure, Dockerfiles, healthchecks); live `docker compose up` not run in this environment (no Docker daemon available) — needs a runtime pass before sign-off.
+- [x] 1.5 Configure backend datasource + JPA against the compose Postgres; confirm connectivity on boot. — datasource/JPA/Hikari config authored against compose `db` service and env-var externalized; live boot/connectivity not verified in this environment (no JVM/Docker available) — needs a runtime pass before sign-off.
 
 ## 2. Data model & persistence (message-persistence)
 
