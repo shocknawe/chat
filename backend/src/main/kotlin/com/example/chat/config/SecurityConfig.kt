@@ -1,45 +1,68 @@
 package com.example.chat.config
 
+import com.example.chat.security.RestAuthenticationEntryPoint
+import com.example.chat.security.UserIdHeaderAuthenticationFilter
+import com.example.chat.security.UserIdentityService
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.http.HttpMethod
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
 import org.springframework.security.config.annotation.web.invoke
+import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.web.SecurityFilterChain
+import org.springframework.security.web.authentication.AnonymousAuthenticationFilter
 
 /**
- * Scaffold security configuration (work package 1).
+ * Real security posture for work package 3 (`user-directory` / `conversations`),
+ * replacing the WP1 scaffold's blanket `permitAll`.
  *
- * `spring-boot-starter-security` is on the classpath so Spring Boot's default
- * auto-config would otherwise secure *every* request behind HTTP Basic with a
- * generated password — including `/actuator/health`, which the docker-compose
- * `backend` healthcheck depends on. This bean replaces that default with the
- * minimum needed for WP1: actuator health/info are open, everything else
- * currently permits all too since no real endpoints exist yet.
+ * Demo identity binding (design.md: "Window-scoped demo identity with
+ * minimal Spring Security binding"):
+ * - `GET /api/users` and actuator health/info stay public.
+ * - Every other request must carry an `X-User-Id` header that
+ *   [UserIdHeaderAuthenticationFilter] resolves, via the shared
+ *   [UserIdentityService], to a seeded user. Missing/malformed/unknown
+ *   identities are left unauthenticated, so `authorizeHttpRequests`'s
+ *   `authenticated()` rule rejects them with `401` via
+ *   [RestAuthenticationEntryPoint] — never `403`.
+ * - `403` is reserved for a *valid* identity that isn't a participant in the
+ *   requested conversation; that check is not expressible as a static
+ *   `authorizeHttpRequests` rule (it depends on the path variable and a DB
+ *   lookup), so it is enforced in the service/controller layer instead (see
+ *   `ConversationService`) and mapped to `403` by the API exception handler.
  *
- * This is intentionally NOT the final security posture. Work package 3
- * (`user-directory` / `conversations`) replaces this with the real
- * `X-User-Id` validation filter described in design.md, and later work
- * packages add the WebSocket handshake interceptor. Extend this class then —
- * do not scatter security config elsewhere.
+ * Stateless: no session/cookie is created (`SessionCreationPolicy.STATELESS`)
+ * — every request re-authenticates from its `X-User-Id` header, consistent
+ * with CSRF being inapplicable to this session-less API.
+ *
+ * A later work package (WP4) adds a WebSocket handshake interceptor that
+ * reuses the same [UserIdentityService] for the `?userId=` query parameter;
+ * extend this class rather than scattering security config elsewhere.
  */
 @Configuration
-class SecurityConfig {
+class SecurityConfig(
+    private val userIdentityService: UserIdentityService,
+    private val restAuthenticationEntryPoint: RestAuthenticationEntryPoint,
+) {
 
-	@Bean
-	fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
-		http {
-			// Stateless API scaffold: no browser session/cookie auth, so CSRF
-			// protection (which defends session-based state changes) is not
-			// applicable here. Revisit if session-based auth is introduced.
-			csrf { disable() }
-			authorizeHttpRequests {
-				authorize("/actuator/health", permitAll)
-				authorize("/actuator/info", permitAll)
-				// TODO(WP3): replace with real X-User-Id authorization rules
-				// once REST endpoints exist. Left open for WP1 scaffold only.
-				authorize(anyRequest, permitAll)
-			}
-		}
-		return http.build()
-	}
+    @Bean
+    fun securityFilterChain(http: HttpSecurity): SecurityFilterChain {
+        http {
+            csrf { disable() }
+            sessionManagement { sessionCreationPolicy = SessionCreationPolicy.STATELESS }
+            authorizeHttpRequests {
+                authorize("/actuator/health", permitAll)
+                authorize("/actuator/info", permitAll)
+                authorize(HttpMethod.GET, "/api/users", permitAll)
+                authorize(anyRequest, authenticated)
+            }
+            exceptionHandling {
+                authenticationEntryPoint = restAuthenticationEntryPoint
+            }
+            addFilterBefore<AnonymousAuthenticationFilter>(
+                UserIdHeaderAuthenticationFilter(userIdentityService),
+            )
+        }
+        return http.build()
+    }
 }

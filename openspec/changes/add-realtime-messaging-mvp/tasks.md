@@ -17,10 +17,10 @@
 
 ## 3. REST API (user-directory, conversations)
 
-- [ ] 3.1 `GET /api/users` returns the configured MVP users.
-- [ ] 3.2 Implement demo identity binding: keep selection window-scoped on the frontend; validate `X-User-Id` in a Spring Security filter for protected REST requests; reject missing/unknown users.
-- [ ] 3.3 `GET /api/conversations` returns only conversations where the authenticated user participates.
-- [ ] 3.4 `GET /api/conversations/{id}/messages` verifies participation, rejects non-participants, returns history in deterministic chronological order.
+- [x] 3.1 `GET /api/users` returns the configured MVP users.
+- [x] 3.2 Implement demo identity binding: keep selection window-scoped on the frontend; validate `X-User-Id` in a Spring Security filter for protected REST requests; reject missing/unknown users.
+- [x] 3.3 `GET /api/conversations` returns only conversations where the authenticated user participates.
+- [x] 3.4 `GET /api/conversations/{id}/messages` verifies participation, rejects non-participants, returns history in deterministic chronological order.
 
 ## 4. Realtime protocol & connection layer (realtime-messaging)
 
