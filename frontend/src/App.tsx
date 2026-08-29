@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchConversations, fetchUsers, type User } from './api'
-import { clearStoredUserId, readStoredUserId, storeUserId } from './identity'
+import {
+  clearStoredConversationId,
+  clearStoredUserId,
+  readStoredConversationId,
+  readStoredUserId,
+  storeConversationId,
+  storeUserId,
+} from './identity'
 import { ConversationList } from './components/ConversationList'
 import { ThreadPane } from './components/ThreadPane'
 import { UserSelectScreen } from './components/UserSelectScreen'
@@ -76,16 +83,50 @@ interface SignedInShellProps {
  * resets — an id from the previous user's list can never leak across.
  *
  * The thread pane (task 5.3) loads and renders history on selection.
+ *
+ * Reload restore (task 5.4): the selected conversation id is persisted in
+ * sessionStorage alongside the identity, so a page reload restores both.
+ * The restored id is read once at mount and *validated* against the fetched
+ * conversations for this user — a stale id (conversation deleted, user
+ * removed from it) is dropped from both state and storage, leaving the
+ * thread pane empty. Once a valid id resolves, the messages query mounts
+ * and re-fetches the persisted history from the server: a page load is a
+ * fresh page with an empty query cache, and TanStack Query's default
+ * staleTime (0) refetches on mount regardless, so history is never served
+ * stale across reloads.
  */
 function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
   const conversationsQuery = useQuery({
     queryKey: ['conversations', user.id],
     queryFn: () => fetchConversations(user.id),
   })
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(() =>
+    readStoredConversationId(user.id),
+  )
 
   const selectedConversation =
     conversationsQuery.data?.find((c) => c.id === selectedConversationId) ?? null
+
+  // Restored-selection validation: once the conversations list arrives, a
+  // stored id that no longer matches one of this user's conversations is
+  // dropped (stale ids must never pin the rail highlight or the thread).
+  // Render already derives `selectedConversation === null` for a stale id;
+  // this syncs state and external storage to match.
+  useEffect(() => {
+    if (
+      conversationsQuery.data !== undefined &&
+      selectedConversationId !== null &&
+      !conversationsQuery.data.some((c) => c.id === selectedConversationId)
+    ) {
+      clearStoredConversationId(user.id)
+      setSelectedConversationId(null)
+    }
+  }, [conversationsQuery.data, selectedConversationId, user.id])
+
+  const handleSelectConversation = (conversationId: string) => {
+    storeConversationId(user.id, conversationId)
+    setSelectedConversationId(conversationId)
+  }
 
   return (
     <div className="shell">
@@ -114,7 +155,7 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
           error={conversationsQuery.error}
           onRetry={() => void conversationsQuery.refetch()}
           selectedId={selectedConversationId}
-          onSelect={setSelectedConversationId}
+          onSelect={handleSelectConversation}
         />
         <ThreadPane currentUser={user} conversation={selectedConversation} />
       </main>

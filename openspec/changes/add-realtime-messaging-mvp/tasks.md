@@ -39,7 +39,7 @@
 - [x] 5.1 On load, fetch and display available users via TanStack Query; keep the selection in React state or `sessionStorage` (not `localStorage`) so browser windows can use different identities.
 - [x] 5.2 With current user established, fetch and display that user's conversations.
 - [x] 5.3 On conversation select, fetch and render message history in chronological order.
-- [ ] 5.4 On page reload, re-fetch persisted history for the current user/conversation.
+- [x] 5.4 On page reload, re-fetch persisted history for the current user/conversation.
 
 ## 6. Frontend — WebSocket client module (realtime-messaging)
 
