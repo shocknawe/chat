@@ -13,9 +13,13 @@
   --brand-grad: linear-gradient(45deg, #aa41af 5%, #3c69c8 60%, #00a5e6 100%);
   --glow-1: #aa41af66;
 
-  /* Semantic status (text forms are theme-tuned, per DESIGN.md) */
+  /* Semantic status (text forms are theme-tuned, per DESIGN.md; the raw warn
+     hue and its step-downs are theme-invariant — fills, borders, dots only) */
   --ok: #088043;
   --warn-ink: #8a5200;
+  --warn: #f2a33c;
+  --warn-tint: #f2a33c26;
+  --warn-stroke: #f2a33c59;
   --danger: #b00020;
 
   /* Fields + ink ramp */
@@ -436,6 +440,60 @@ body::before {
   font-size: 15px;
 }
 
+/* ---------- Connection availability indicator (task 6.6) ---------- */
+
+/* The live-region wrapper: always mounted (empty while connected) so the
+   role="status" target never enters or leaves the accessibility tree — only
+   its content changes. */
+.connection-status {
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+
+/* Pill recipe from DESIGN.md's connection-banner token: warn-tinted fill,
+   pill radius, words carrying the state with the dot as the second signal. */
+.connection-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-pill);
+  animation: connection-status-enter 240ms var(--ease);
+}
+
+/* The spec's "temporarily unavailable" state: calm, never a red alarm bar —
+   the dot carries the warn hue and tint, the words stay legible ink. */
+.connection-status-pill--warn {
+  color: var(--ink);
+  background: var(--warn-tint);
+  border-color: var(--warn-stroke);
+}
+
+.connection-status-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: var(--r-pill);
+  background: var(--ink-3);
+}
+
+.connection-status-pill--warn .connection-status-dot {
+  background: var(--warn);
+}
+
+@keyframes connection-status-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
 .shell-body {
   flex: 1;
   display: grid;
@@ -846,6 +904,10 @@ body::before {
   .message-skeleton {
     animation: none;
     opacity: 0.6;
+  }
+
+  .connection-status-pill {
+    animation: none;
   }
 
   .btn,

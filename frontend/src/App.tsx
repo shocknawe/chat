@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchConversations, fetchUsers, type User } from './api'
 import {
@@ -9,6 +9,7 @@ import {
   storeConversationId,
   storeUserId,
 } from './identity'
+import { ConnectionStatus } from './components/ConnectionStatus'
 import { ConversationList } from './components/ConversationList'
 import { ThreadPane } from './components/ThreadPane'
 import { UserSelectScreen } from './components/UserSelectScreen'
@@ -16,7 +17,8 @@ import { useChatSocket } from './hooks/useChatSocket'
 import { usePendingMessages } from './hooks/usePendingMessages'
 import { initials } from './initials'
 import { upsertAuthoritativeMessage } from './messagesCache'
-import type { ErrorEvent, MessageAckEvent, NewMessageEvent } from './realtime'
+import { queryClient } from './queryClient'
+import type { ConnectionState, ErrorEvent, MessageAckEvent, NewMessageEvent } from './realtime'
 
 /**
  * Root component: establishes the window-scoped current user before any
@@ -181,8 +183,8 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
   // renders then) and terminated on user switch/unmount. `sendMessage` is
   // consumed by the submit path below, the ack/error handlers are 6.4, the
   // new-message handler is 6.5 (all wired here), and `connectionState` feeds
-  // the availability indicator in 6.6.
-  const { sendMessage } = useChatSocket(user.id, {
+  // the task-6.6 availability indicator and the reconnect history refresh.
+  const { sendMessage, connectionState } = useChatSocket(user.id, {
     onMessageAck: handleMessageAck,
     onNewMessage: handleNewMessage,
     onRealtimeError: handleRealtimeError,
@@ -236,6 +238,49 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
     }
   }, [conversationsQuery.data, selectedConversationId, user.id])
 
+  /**
+   * Task 6.6 reconnect recovery. The window between an unexpected disconnect
+   * and the reconnect can contain messages whose NEW_MESSAGE events never
+   * reached this window (server-side: "Message recoverable after missed
+   * delivery"). Recovery: on every transition INTO `connected` AFTER this
+   * shell instance's first connection, invalidate the active conversation's
+   * history so TanStack Query refetches it from the backend.
+   *
+   * Initial-connect exclusion: `hasConnectedRef` distinguishes the two cases —
+   * the FIRST `connected` of a shell instance must NOT refetch, because the
+   * messages query already owns initial history load (mount-time fetch).
+   * `prevConnectionStateRef` guards the effect's dependencies: re-running the
+   * effect for a conversation switch while already `connected` is not a
+   * reconnect and must not refetch either.
+   *
+   * StrictMode/user-switch safety: the shell mounts fresh per identity (keyed
+   * on `user.id`), so both refs reset; the StrictMode double-socket still
+   * reports exactly one connected transition (socket A is terminated before
+   * it can open), which the ref correctly classifies as the initial connect.
+   *
+   * Merge safety: a refetch response could, in principle, land after a
+   * WebSocket upsert for a newer message and momentarily drop it; task 6.7
+   * makes the history merge safe against exactly that race. This invalidation
+   * is the spec's recovery mechanism and lands now — the merge hardening is
+   * 6.7's job, deliberately not duplicated here.
+   */
+  const hasConnectedRef = useRef(false)
+  const prevConnectionStateRef = useRef<ConnectionState>(connectionState)
+  useEffect(() => {
+    const prevState = prevConnectionStateRef.current
+    prevConnectionStateRef.current = connectionState
+
+    if (connectionState !== 'connected') return
+    const isReconnect = hasConnectedRef.current && prevState !== 'connected'
+    hasConnectedRef.current = true
+
+    if (isReconnect && selectedConversationId !== null) {
+      void queryClient.invalidateQueries({
+        queryKey: ['messages', user.id, selectedConversationId],
+      })
+    }
+  }, [connectionState, user.id, selectedConversationId])
+
   const handleSelectConversation = (conversationId: string) => {
     storeConversationId(user.id, conversationId)
     setSelectedConversationId(conversationId)
@@ -249,6 +294,7 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
           <span className="title">Chat</span>
         </div>
         <div className="app-header-user">
+          <ConnectionStatus state={connectionState} />
           <span className="chip">
             <span className="avatar avatar--sm" aria-hidden="true">
               {initials(user.displayName)}
