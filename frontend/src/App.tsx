@@ -10,11 +10,14 @@ import {
   storeUserId,
 } from './identity'
 import { ConnectionStatus } from './components/ConnectionStatus'
-import { ConversationList } from './components/ConversationList'
+import { ConversationList, conversationLabel } from './components/ConversationList'
 import { ThreadPane } from './components/ThreadPane'
 import { UserSelectScreen } from './components/UserSelectScreen'
+import { useAnnouncer } from './hooks/useAnnouncer'
 import { useChatSocket } from './hooks/useChatSocket'
+import { COMPACT_QUERY, useMediaQuery } from './hooks/useMediaQuery'
 import { usePendingMessages } from './hooks/usePendingMessages'
+import { useTheme } from './hooks/useTheme'
 import { initials } from './initials'
 import { upsertAuthoritativeMessage } from './messagesCache'
 import { queryClient } from './queryClient'
@@ -30,10 +33,17 @@ import type { ConnectionState, ErrorEvent, MessageAckEvent, NewMessageEvent } fr
  * longer matches a configured user is discarded and the selection screen
  * shows again. Once established, the signed-in shell mounts the conversation
  * rail (task 5.2) and, later, the message thread (tasks 5.3–5.4).
+ *
+ * Accessibility announcer (task 2.7): one polite live region lives here,
+ * above the identity gate, because `SignedInShell` below is fully remounted
+ * (via its `user.id` key) on every identity switch — a live region owned by
+ * it would be torn down at exactly the moment it needs to announce the
+ * switch that just happened.
  */
 function App() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(() => readStoredUserId())
   const usersQuery = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
+  const { announcement, announce } = useAnnouncer()
 
   const users = usersQuery.data
   const currentUser = users?.find((user) => user.id === selectedUserId) ?? null
@@ -52,6 +62,7 @@ function App() {
   const handleSelect = (user: User) => {
     storeUserId(user.id)
     setSelectedUserId(user.id)
+    announce(`Signed in as ${user.displayName}`)
   }
 
   const handleSwitchUser = () => {
@@ -59,25 +70,37 @@ function App() {
     setSelectedUserId(null)
   }
 
-  if (currentUser === null) {
-    return (
-      <UserSelectScreen
-        users={users}
-        isPending={usersQuery.isPending}
-        error={usersQuery.error}
-        onRetry={() => void usersQuery.refetch()}
-        onSelect={handleSelect}
-      />
-    )
-  }
-
-  return <SignedInShell key={currentUser.id} user={currentUser} onSwitchUser={handleSwitchUser} />
+  return (
+    <>
+      {currentUser === null ? (
+        <UserSelectScreen
+          users={users}
+          isPending={usersQuery.isPending}
+          error={usersQuery.error}
+          onRetry={() => void usersQuery.refetch()}
+          onSelect={handleSelect}
+        />
+      ) : (
+        <SignedInShell key={currentUser.id} user={currentUser} onSwitchUser={handleSwitchUser} announce={announce} />
+      )}
+      {/* Task 2.7: conversation, identity, and delivery-status changes are
+          announced here — see the components above for where `announce` is
+          called for each. */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </div>
+    </>
+  )
 }
 
 interface SignedInShellProps {
   user: User
   onSwitchUser: () => void
+  announce: (message: string) => void
 }
+
+/** The one overlay the compact shell can present; a union so a later slice's drawer joins without restructuring the exclusivity mechanism. */
+type OverlayId = 'rail'
 
 /**
  * Chat app frame rendered once the current user is established: a
@@ -101,7 +124,44 @@ interface SignedInShellProps {
  * staleTime (0) refetches on mount regardless, so history is never served
  * stale across reloads.
  */
-function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
+function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
+  const { theme, toggleTheme } = useTheme()
+  const isCompact = useMediaQuery(COMPACT_QUERY)
+
+  // Task 2.6: exclusive overlay state. Only the rail exists in this slice,
+  // but the shape (a single "currently open overlay id, or none" value) is
+  // exactly what makes exclusivity trivial to extend — opening a second
+  // overlay is just another `setOpenOverlay` call, which always replaces
+  // whatever was open rather than stacking.
+  const [openOverlay, setOpenOverlay] = useState<OverlayId | null>(null)
+  const railToggleRef = useRef<HTMLButtonElement | null>(null)
+
+  const closeOverlay = useCallback(() => {
+    setOpenOverlay(null)
+    railToggleRef.current?.focus()
+  }, [])
+
+  // Crossing above the compact threshold while the rail overlay is open must
+  // not leave it stranded mid-transition-state: it is no longer an overlay
+  // at all above the threshold, so the "open" flag is meaningless there.
+  useEffect(() => {
+    if (!isCompact && openOverlay !== null) {
+      setOpenOverlay(null)
+    }
+  }, [isCompact, openOverlay])
+
+  // Dismiss key (task 2.6).
+  useEffect(() => {
+    if (openOverlay === null) return
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        closeOverlay()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [openOverlay, closeOverlay])
+
   // Pending outbound items (task 6.3): optimistic messages with no server id
   // yet, held OUTSIDE the TanStack cache. State is lifted here — the common
   // ancestor of ThreadPane (renders it) and the socket handlers (6.4 mutates
@@ -125,8 +185,10 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
     (event: MessageAckEvent) => {
       removePending(event.clientMessageId)
       upsertAuthoritativeMessage(user.id, event.message)
+      // Task 2.7: delivery-status change, announced in words.
+      announce('Message sent')
     },
-    [removePending, user.id],
+    [removePending, user.id, announce],
   )
 
   /**
@@ -141,11 +203,13 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
     (event: ErrorEvent) => {
       if (event.clientMessageId !== undefined) {
         markPendingFailed(event.clientMessageId)
+        // Task 2.7: delivery-status change, announced in words.
+        announce('Message failed to send')
         return
       }
       console.warn(`[chat] uncorrelated realtime error ${event.code}: ${event.reason}`)
     },
-    [markPendingFailed],
+    [markPendingFailed, announce],
   )
 
   /**
@@ -285,17 +349,87 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
   const handleSelectConversation = (conversationId: string) => {
     storeConversationId(user.id, conversationId)
     setSelectedConversationId(conversationId)
+    // Task 2.6: selecting a conversation is one of the overlay's dismissal
+    // mechanisms, and it must go through the same focus-returning close as
+    // Escape and the scrim — the compact rail leaves the DOM inert as it
+    // closes, so dismissing via selection has to put focus back on a live
+    // control (the toggle) instead of dropping it onto <body>.
+    closeOverlay()
+    // Task 2.7: conversation-selection change, announced in words.
+    const conversation = conversationsQuery.data?.find((c) => c.id === conversationId)
+    if (conversation !== undefined) {
+      announce(`Conversation with ${conversationLabel(conversation, user.id)} selected`)
+    }
   }
+
+  const isRailOpen = openOverlay === 'rail'
 
   return (
     <div className="shell">
-      <header className="app-header">
+      {/* Task 2.7: first focusable element on the signed-in shell. */}
+      <a href="#main-content" className="skip-link">
+        Skip to conversation
+      </a>
+      <header className="app-header" aria-label="Chat">
         <div className="app-header-brand">
+          {isCompact && (
+            <button
+              ref={railToggleRef}
+              type="button"
+              className="icon-button mobile-rail-toggle"
+              aria-label={isRailOpen ? 'Close conversations' : 'Open conversations'}
+              aria-expanded={isRailOpen}
+              aria-controls="conversation-rail"
+              onClick={() => setOpenOverlay(isRailOpen ? null : 'rail')}
+            >
+              <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M4 7h16M4 12h16M4 17h16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          )}
           <span className="brand-mark brand-mark--sm" aria-hidden="true" />
           <span className="title">Chat</span>
         </div>
         <div className="app-header-user">
           <ConnectionStatus state={connectionState} />
+          <button
+            type="button"
+            className="icon-button theme-toggle"
+            onClick={toggleTheme}
+            aria-pressed={theme === 'dark'}
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          >
+            {theme === 'dark' ? (
+              <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                <path
+                  d="M12 2v2.5M12 19.5V22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M2 12h2.5M19.5 12H22M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+            ) : (
+              <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+          </button>
           <span className="chip">
             <span className="avatar avatar--sm" aria-hidden="true">
               {initials(user.displayName)}
@@ -307,7 +441,7 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
           </button>
         </div>
       </header>
-      <main className="shell-body">
+      <main id="main-content" className="shell-body" tabIndex={-1}>
         <ConversationList
           currentUserId={user.id}
           conversations={conversationsQuery.data}
@@ -316,6 +450,8 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
           onRetry={() => void conversationsQuery.refetch()}
           selectedId={selectedConversationId}
           onSelect={handleSelectConversation}
+          isCompact={isCompact}
+          isOverlayOpen={isRailOpen}
         />
         <ThreadPane
           currentUser={user}
@@ -328,6 +464,11 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
           }}
         />
       </main>
+      {/* Task 2.6: the scrim is one of the overlay's dismissal mechanisms and
+          doubles as the visual cue that the rail is modal while open. */}
+      {isRailOpen && (
+        <button type="button" className="scrim" aria-label="Close conversations" onClick={closeOverlay} />
+      )}
     </div>
   )
 }

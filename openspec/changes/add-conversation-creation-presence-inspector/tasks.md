@@ -19,14 +19,14 @@ is never cut (slices 2–4 depend on it to be demonstrable).
 
 ## 2. Slice 1 — Shell re-skin
 
-- [ ] 2.1 Re-skin the header (accessible name) in `App.tsx`
-- [ ] 2.2 Re-skin rail rows with avatars in `ConversationList.tsx`
-- [ ] 2.3 Re-skin the thread header (initials, name, supporting line, inspector control placeholder) and per-message rows (meta line, date dividers, empty thread) in `ThreadPane.tsx`
-- [ ] 2.4 Re-skin `Composer.tsx` (auto-growing, whitespace-only submission unavailable)
-- [ ] 2.5 Add theme toggle: light/dark, OS-preference default, persisted override
-- [ ] 2.6 Add mobile slide-over rail (dismissed by selection, dismiss key, or scrim; overlays mutually exclusive)
-- [ ] 2.7 Add skip-to-conversation link, live-region announcer, visible focus indicators, reduced-motion support
-- [ ] 2.8 Verify every pre-existing loading, error, retry, and empty state still functions, and that bottom-anchoring still holds after the scroll container is re-skinned: a realtime arrival does not move a scrolled-up reader, and a submission positions the thread on the new message
+- [x] 2.1 Re-skin the header (accessible name) in `App.tsx`
+- [x] 2.2 Re-skin rail rows with avatars in `ConversationList.tsx`
+- [x] 2.3 Re-skin the thread header (initials, name, supporting line, inspector control placeholder) and per-message rows (meta line, date dividers, empty thread) in `ThreadPane.tsx`
+- [x] 2.4 Re-skin `Composer.tsx` (auto-growing, whitespace-only submission unavailable)
+- [x] 2.5 Add theme toggle: light/dark, OS-preference default, persisted override
+- [x] 2.6 Add mobile slide-over rail (dismissed by selection, dismiss key, or scrim; overlays mutually exclusive)
+- [x] 2.7 Add skip-to-conversation link, live-region announcer, visible focus indicators, reduced-motion support
+- [x] 2.8 Verify every pre-existing loading, error, retry, and empty state still functions, and that bottom-anchoring still holds after the scroll container is re-skinned: a realtime arrival does not move a scrolled-up reader, and a submission positions the thread on the new message
 
 ## 3. Slice 2 — Conversation creation
 

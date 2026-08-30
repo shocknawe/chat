@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import type { Conversation } from '../api'
 import { initials } from '../initials'
 
@@ -7,13 +8,21 @@ import { initials } from '../initials'
  * switch of identity naturally re-scopes the query.
  *
  * Human labels: the backend `ConversationDto` exposes the full participant
- * list (`{ id, displayName }`), so the label is the OTHER participants'
- * display names joined. Only if a conversation somehow has no other
- * participant do we fall back to a shortened-id label — no invented fields.
+ * list (`{ id, displayName }`), so the label is the OTHER participants' names
+ * joined. Only if a conversation somehow has no other participant do we fall
+ * back to a shortened-id label — no invented fields.
  *
  * Every state is announced in words (DESIGN.md, Status-Is-Text): a text
  * status line + skeleton tiles while loading, `role="alert"` with retry on
  * failure, and an explicit empty note when the user has no conversations.
+ *
+ * Compact-viewport overlay (task 2.6): below the compact breakpoint the rail
+ * is presented as a slide-over rather than a fixed column. `App.tsx` owns
+ * whether it is currently open (part of the app-wide exclusive-overlay
+ * state) and whether the viewport is compact at all; this component just
+ * reflects that as a class for the CSS transform and, while compact and
+ * closed, marks itself `inert` so its buttons are neither focusable nor
+ * exposed to assistive technology while off-screen.
  */
 
 export function conversationLabel(conversation: Conversation, currentUserId: string): string {
@@ -32,6 +41,10 @@ interface ConversationListProps {
   onRetry: () => void
   selectedId: string | null
   onSelect: (conversationId: string) => void
+  /** True while the viewport is below the compact breakpoint (task 2.6). */
+  isCompact?: boolean
+  /** True while the rail overlay is the currently open overlay. Meaningless when `isCompact` is false. */
+  isOverlayOpen?: boolean
 }
 
 export function ConversationList({
@@ -42,9 +55,28 @@ export function ConversationList({
   onRetry,
   selectedId,
   onSelect,
+  isCompact = false,
+  isOverlayOpen = false,
 }: ConversationListProps) {
+  const navRef = useRef<HTMLElement | null>(null)
+  const isOffCanvas = isCompact && !isOverlayOpen
+
+  // `inert` is a DOM property, not a JSX attribute this TS/React version
+  // types — applied imperatively so a closed off-canvas rail can never
+  // receive keyboard focus or be read by assistive technology, even though
+  // it remains present (translated out of the viewport) for the slide-in
+  // transition.
+  useEffect(() => {
+    const node = navRef.current
+    if (node !== null) {
+      node.inert = isOffCanvas
+    }
+  }, [isOffCanvas])
+
+  const className = ['rail', 'card', isCompact && isOverlayOpen ? 'rail--open' : ''].filter(Boolean).join(' ')
+
   return (
-    <nav className="rail card" aria-labelledby="rail-title">
+    <nav ref={navRef} id="conversation-rail" className={className} aria-labelledby="rail-title">
       <h2 id="rail-title" className="title rail-title">
         Conversations
       </h2>

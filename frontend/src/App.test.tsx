@@ -25,6 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import * as api from './api'
 import type { Conversation, Message, User } from './api'
+import { COMPACT_QUERY } from './hooks/useMediaQuery'
 import { queryClient } from './queryClient'
 import * as realtime from './realtime'
 import type { ChatSocket, ChatSocketOptions } from './realtime'
@@ -146,6 +147,101 @@ describe('pending → sent/failed reconciliation (App-level)', () => {
     expect(await screen.findByText('Failed to send')).toBeInTheDocument()
     // The bubble is retained, not removed.
     expect(screen.getByText('This will fail')).toBeInTheDocument()
+  })
+})
+
+describe('composer submission availability (task 2.4, spec: empty submissions are unavailable)', () => {
+  it('a whitespace-only draft cannot be submitted by button or Enter', async () => {
+    vi.spyOn(api, 'fetchMessages').mockResolvedValue([])
+    const user = await renderSignedInOnConversation()
+
+    const textbox = await screen.findByRole('textbox', { name: /message to bob/i })
+    await user.type(textbox, '   ')
+
+    // The affordance itself signals unavailability …
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+    // … and Enter (the second submit path) no-ops as well.
+    await user.keyboard('{Enter}')
+
+    expect(captured[0]?.sendMessage).not.toHaveBeenCalled()
+    expect(screen.queryByText('Sending…')).not.toBeInTheDocument()
+  })
+})
+
+describe('compact-viewport rail overlay (task 2.6, spec: compact viewports use exclusive overlays)', () => {
+  const originalMatchMedia = window.matchMedia
+
+  // Only the compact threshold matches; every other query (theme, reduced
+  // motion) reports false, exactly like the global jsdom polyfill.
+  beforeEach(() => {
+    window.matchMedia = ((query: string): MediaQueryList =>
+      ({
+        matches: query === COMPACT_QUERY,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }) as MediaQueryList) as typeof window.matchMedia
+  })
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia
+  })
+
+  async function openRailOverlay(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await user.click(await screen.findByRole('button', { name: 'Open conversations' }))
+    // While open, the toggle relabels to "Close conversations" (shared with
+    // the scrim, which is rendered only while an overlay is open) — so
+    // "Open conversations" disappearing IS the open-state observable.
+    expect(screen.queryByRole('button', { name: 'Open conversations' })).not.toBeInTheDocument()
+    expect(document.querySelector('button.scrim')).not.toBeNull()
+  }
+
+  async function expectOverlayClosed(): Promise<void> {
+    const toggle = await screen.findByRole('button', { name: 'Open conversations' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(document.querySelector('button.scrim')).toBeNull()
+    // Every dismissal path (Escape, scrim, selection) routes through the same
+    // focus-returning close — the rail is inert as it closes, so focus must
+    // never be left on <body>.
+    expect(document.activeElement).toBe(toggle)
+  }
+
+  it('the dismiss key (Escape) closes the open rail overlay', async () => {
+    vi.spyOn(api, 'fetchMessages').mockResolvedValue([])
+    const user = await renderSignedInOnConversation()
+    await openRailOverlay(user)
+
+    await user.keyboard('{Escape}')
+    await expectOverlayClosed()
+  })
+
+  it('activating the scrim closes the open rail overlay', async () => {
+    vi.spyOn(api, 'fetchMessages').mockResolvedValue([])
+    const user = await renderSignedInOnConversation()
+    await openRailOverlay(user)
+
+    // The scrim and the open toggle share the "Close conversations" label, so
+    // the scrim is located by its dedicated class (it is the only element
+    // rendered with it, and only while an overlay is open).
+    const scrim = document.querySelector('button.scrim')
+    expect(scrim).not.toBeNull()
+    await user.click(scrim as HTMLElement)
+    await expectOverlayClosed()
+  })
+
+  it('selecting a conversation closes the open rail overlay', async () => {
+    vi.spyOn(api, 'fetchMessages').mockResolvedValue([])
+    const user = await renderSignedInOnConversation()
+    await openRailOverlay(user)
+
+    // The rail row for the Bob conversation (the identity screen's "Bob" is
+    // gone — we are already signed in as Alice).
+    await user.click(screen.getByRole('button', { name: 'Bob' }))
+    await expectOverlayClosed()
   })
 })
 

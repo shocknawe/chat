@@ -37,7 +37,8 @@ import { fetchMergedHistory } from '../messagesCache'
  *   the simple near-bottom rule.
  *
  * Positioning is instant rather than animated, so it cannot fight the reader
- * or surprise anyone under reduced motion.
+ * or surprise anyone under reduced motion. (task 2.7 keeps it that way —
+ * there is no scroll animation to gate behind `prefers-reduced-motion`.)
  */
 
 /** Distance from the bottom (px) within which a realtime append still auto-scrolls. */
@@ -49,23 +50,59 @@ interface MessageGroup {
   messages: Message[]
 }
 
-function groupBySender(sorted: Message[]): MessageGroup[] {
-  const groups: MessageGroup[] = []
-  for (const message of sorted) {
-    const last = groups.at(-1)
-    if (last !== undefined && last.senderId === message.senderId) {
-      last.messages.push(message)
-    } else {
-      groups.push({ senderId: message.senderId, messages: [message] })
-    }
-  }
-  return groups
+/** One calendar day's worth of sender groups, headed by a date divider (task 2.3). */
+interface DaySection {
+  key: string
+  label: string
+  groups: MessageGroup[]
 }
 
-const timestampFormat = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-})
+function dayKey(iso: string): string {
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+}
+
+function startOfDay(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+}
+
+const dayLabelFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'full' })
+
+/** "Today" / "Yesterday" for the two recent, common cases; otherwise a full date. */
+function formatDayLabel(iso: string): string {
+  const date = new Date(iso)
+  const diffDays = Math.round((startOfDay(new Date()) - startOfDay(date)) / 86_400_000)
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  return dayLabelFormat.format(date)
+}
+
+/**
+ * Groups chronologically sorted messages first by calendar day, then by
+ * consecutive sender within each day — a day never merges into its
+ * neighbour even if the same person sent the last message of one day and
+ * the first of the next (task 2.3's date-divider requirement).
+ */
+function groupByDay(sorted: Message[]): DaySection[] {
+  const sections: DaySection[] = []
+  for (const message of sorted) {
+    const key = dayKey(message.createdAt)
+    let section = sections.at(-1)
+    if (section === undefined || section.key !== key) {
+      section = { key, label: formatDayLabel(message.createdAt), groups: [] }
+      sections.push(section)
+    }
+    const lastGroup = section.groups.at(-1)
+    if (lastGroup !== undefined && lastGroup.senderId === message.senderId) {
+      lastGroup.messages.push(message)
+    } else {
+      section.groups.push({ senderId: message.senderId, messages: [message] })
+    }
+  }
+  return sections
+}
+
+const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' })
 
 interface ThreadPaneProps {
   currentUser: User
@@ -105,7 +142,17 @@ export function ThreadPane({ currentUser, conversation, pendingMessages, onSendM
     return [...messagesQuery.data].sort(compareMessages)
   }, [messagesQuery.data])
 
-  const groups = useMemo(() => (messages === undefined ? undefined : groupBySender(messages)), [messages])
+  const sections = useMemo(() => (messages === undefined ? undefined : groupByDay(messages)), [messages])
+
+  // If the pending block lands on a different calendar day than the last
+  // history section (e.g. composing across midnight), it gets its own
+  // divider too — the same rule that separates history sections.
+  const firstPending = threadPending.at(0)
+  const lastSection = sections?.at(-1)
+  const pendingDivider =
+    firstPending !== undefined && (lastSection === undefined || lastSection.key !== dayKey(firstPending.createdAt))
+      ? formatDayLabel(firstPending.createdAt)
+      : undefined
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const messageCount = messages?.length
@@ -169,12 +216,46 @@ export function ThreadPane({ currentUser, conversation, pendingMessages, onSendM
     )
   }
 
+  const otherName = conversationLabel(conversation, currentUser.id)
+
   return (
     <section className="card thread-pane" aria-labelledby="thread-title">
       <header className="thread-header">
-        <h1 id="thread-title" className="title">
-          {conversationLabel(conversation, currentUser.id)}
-        </h1>
+        <span className="avatar" aria-hidden="true">
+          {initials(otherName)}
+        </span>
+        <div className="thread-heading">
+          <h1 id="thread-title" className="title thread-title">
+            {otherName}
+          </h1>
+          {/* Honest supporting line (task 2.3): every conversation in this
+              product is a 1:1 direct message, so this is a true statement
+              about the conversation, not a fabricated presence/activity
+              signal — presence lands in a later slice. */}
+          <p className="meta thread-subtitle">Direct message</p>
+        </div>
+        {/* Inspector control PLACEHOLDER (task 2.3 / design.md decision 7):
+            the real info drawer is Slice 6. This reserves its position and
+            is deliberately non-functional here. */}
+        <button
+          type="button"
+          className="icon-button thread-inspector-toggle"
+          aria-label="Conversation info"
+          title="Conversation info"
+        >
+          <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M8 5h12M8 12h12M8 19h12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+            <circle cx="4" cy="5" r="1.1" fill="currentColor" />
+            <circle cx="4" cy="12" r="1.1" fill="currentColor" />
+            <circle cx="4" cy="19" r="1.1" fill="currentColor" />
+          </svg>
+        </button>
       </header>
       <div className="thread-scroll" ref={scrollRef} onScroll={handleScroll}>
         {messagesQuery.isPending && (
@@ -206,7 +287,7 @@ export function ThreadPane({ currentUser, conversation, pendingMessages, onSendM
           </div>
         )}
 
-        {groups !== undefined && groups.length === 0 && threadPending.length === 0 && (
+        {sections !== undefined && sections.length === 0 && threadPending.length === 0 && (
           <div className="thread-region thread-region--center">
             <div className="thread-empty">
               <p className="meta">No messages yet — send the first message.</p>
@@ -214,83 +295,113 @@ export function ThreadPane({ currentUser, conversation, pendingMessages, onSendM
           </div>
         )}
 
-        {/* History groups, then the pending slice in-flow after them. The list
-            renders whenever either source has items so a first-ever message
-            skips the empty state and appears immediately as pending. */}
-        {groups !== undefined && (groups.length > 0 || threadPending.length > 0) && (
+        {/* History sections (each headed by a date divider after the first),
+            then the pending slice in-flow after them. The list renders
+            whenever either source has items so a first-ever message skips
+            the empty state and appears immediately as pending. */}
+        {sections !== undefined && (sections.length > 0 || threadPending.length > 0) && (
           <div className="thread-region">
             <ol className="message-list">
-              {groups.map((group) => {
-                // Groups are built non-empty; the guard satisfies
-                // noUncheckedIndexedAccess without assertions.
-                const first = group.messages[0]
-                const last = group.messages.at(-1)
-                if (first === undefined || last === undefined) return null
-                const isOwn = group.senderId === currentUser.id
-                const senderName = resolveSender(group.senderId)
-                return (
-                  <li
-                    key={first.id}
-                    className={isOwn ? 'message-group message-group--own' : 'message-group'}
-                  >
-                    {!isOwn && (
-                      <span className="message-sender">
-                        <span className="avatar avatar--sm" aria-hidden="true">
-                          {initials(senderName)}
-                        </span>
-                        <span className="message-sender-name">{senderName}</span>
-                      </span>
-                    )}
-                    {group.messages.map((message, index) => {
-                      const isLast = index === group.messages.length - 1
-                      const classes = [
-                        'message-bubble',
-                        isOwn ? 'message-bubble--own' : 'message-bubble--other',
-                        isLast ? (isOwn ? 'message-bubble--corner-own' : 'message-bubble--corner-other') : '',
-                      ]
-                        .filter((c) => c !== '')
-                        .join(' ')
-                      return (
-                        <p key={message.id} className={classes}>
-                          {message.content}
-                        </p>
-                      )
-                    })}
-                    <span className="meta message-meta">
-                      {timestampFormat.format(new Date(last.createdAt))}
-                    </span>
-                  </li>
-                )
-              })}
-              {threadPending.length > 0 && (
-                <li className="message-group message-group--own" aria-label="Pending messages">
-                  {/* Pending items are always the current user's own: they sit
-                      under history, subdued, each with an explicit status word
-                      so the optimistic state is announced, not just tinted. */}
-                  {threadPending.map((pending) => (
-                    <Fragment key={pending.clientMessageId}>
-                      <p className="message-bubble message-bubble--own message-bubble--pending">
-                        {pending.content}
-                      </p>
-                      <span
-                        className={
-                          pending.status === 'failed'
-                            ? 'meta message-meta message-meta--failed'
-                            : 'meta message-meta'
-                        }
+              {sections.map((section, sectionIndex) => (
+                <Fragment key={section.key}>
+                  {sectionIndex > 0 && (
+                    <li className="date-divider" aria-hidden="true">
+                      <span>{section.label}</span>
+                    </li>
+                  )}
+                  {section.groups.map((group) => {
+                    // Groups are built non-empty; the guard satisfies
+                    // noUncheckedIndexedAccess without assertions.
+                    const first = group.messages[0]
+                    const last = group.messages.at(-1)
+                    if (first === undefined || last === undefined) return null
+                    const isOwn = group.senderId === currentUser.id
+                    const senderName = resolveSender(group.senderId)
+                    return (
+                      <li
+                        key={first.id}
+                        className={isOwn ? 'message-group message-group--own' : 'message-group'}
                       >
-                        {pending.status === 'failed' ? 'Failed to send' : 'Sending…'}
-                      </span>
-                    </Fragment>
-                  ))}
-                </li>
+                        {!isOwn && (
+                          <span className="message-sender">
+                            <span className="avatar avatar--sm" aria-hidden="true">
+                              {initials(senderName)}
+                            </span>
+                            <span className="message-sender-name">{senderName}</span>
+                          </span>
+                        )}
+                        {group.messages.map((message, index) => {
+                          const isLast = index === group.messages.length - 1
+                          const classes = [
+                            'message-bubble',
+                            isOwn ? 'message-bubble--own' : 'message-bubble--other',
+                            isLast
+                              ? isOwn
+                                ? 'message-bubble--corner-own'
+                                : 'message-bubble--corner-other'
+                              : '',
+                          ]
+                            .filter((c) => c !== '')
+                            .join(' ')
+                          return (
+                            <p key={message.id} className={classes}>
+                              {message.content}
+                            </p>
+                          )
+                        })}
+                        {/* Delivery status stated in words (task 2.3 / spec
+                            "Message rows state status"): the backend ack
+                            confirms persistence, not delivery or reading, so
+                            an authoritative message reads "Sent"/"Received" —
+                            never a fabricated "Delivered". Alignment (own
+                            messages right-aligned, no sender name) already
+                            distinguishes authorship; this word is the second,
+                            non-colour signal. */}
+                        <span className="meta message-meta">
+                          {isOwn ? 'Sent · ' : 'Received · '}
+                          {timeFormat.format(new Date(last.createdAt))}
+                        </span>
+                      </li>
+                    )
+                  })}
+                </Fragment>
+              ))}
+              {threadPending.length > 0 && (
+                <>
+                  {pendingDivider !== undefined && (
+                    <li className="date-divider" aria-hidden="true">
+                      <span>{pendingDivider}</span>
+                    </li>
+                  )}
+                  <li className="message-group message-group--own" aria-label="Pending messages">
+                    {/* Pending items are always the current user's own: they sit
+                        under history, subdued, each with an explicit status word
+                        so the optimistic state is announced, not just tinted. */}
+                    {threadPending.map((pending) => (
+                      <Fragment key={pending.clientMessageId}>
+                        <p className="message-bubble message-bubble--own message-bubble--pending">
+                          {pending.content}
+                        </p>
+                        <span
+                          className={
+                            pending.status === 'failed'
+                              ? 'meta message-meta message-meta--failed'
+                              : 'meta message-meta'
+                          }
+                        >
+                          {pending.status === 'failed' ? 'Failed to send' : 'Sending…'}
+                        </span>
+                      </Fragment>
+                    ))}
+                  </li>
+                </>
               )}
             </ol>
           </div>
         )}
       </div>
       <Composer
-        ariaLabel={`Message to ${conversationLabel(conversation, currentUser.id)}`}
+        ariaLabel={`Message to ${otherName}`}
         onSubmit={onSendMessage}
       />
     </section>
