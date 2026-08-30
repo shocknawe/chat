@@ -5,6 +5,7 @@ import { conversationLabel } from './ConversationList'
 import { Composer } from './Composer'
 import type { PendingMessage } from '../hooks/usePendingMessages'
 import { initials } from '../initials'
+import { compareMessages } from '../messageOrder'
 
 /**
  * Thread pane (task 5.3) — the selected conversation's message history.
@@ -15,9 +16,10 @@ import { initials } from '../initials'
  *
  * Ordering: the backend returns history in deterministic chronological order
  * (createdAt ASC, id ASC). The defensive `useMemo` sort below re-applies that
- * exact comparator so task 6.7's REST/realtime merge can rely on the same
- * ordering invariant regardless of payload arrival order. createdAt is an
- * ISO-8601 instant, so lexical comparison is chronological.
+ * exact invariant via the shared `compareMessages` comparator (numeric epoch
+ * compare + id tiebreak — lexical compare misorders Jackson's variable-width
+ * fractional seconds), so render order and the task-6.4 cache upsert order
+ * can never disagree.
  *
  * Scroll: the thread is anchored to the bottom (DESIGN.md). The scroll effect
  * fires on conversation change and on the message count arriving — with no
@@ -78,10 +80,7 @@ export function ThreadPane({ currentUser, conversation, pendingMessages, onSendM
 
   const messages = useMemo(() => {
     if (messagesQuery.data === undefined) return undefined
-    return [...messagesQuery.data].sort((a, b) => {
-      const byTime = a.createdAt.localeCompare(b.createdAt)
-      return byTime !== 0 ? byTime : a.id.localeCompare(b.id)
-    })
+    return [...messagesQuery.data].sort(compareMessages)
   }, [messagesQuery.data])
 
   const groups = useMemo(() => (messages === undefined ? undefined : groupBySender(messages)), [messages])

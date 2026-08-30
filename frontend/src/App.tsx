@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchConversations, fetchUsers, type User } from './api'
 import {
@@ -15,6 +15,8 @@ import { UserSelectScreen } from './components/UserSelectScreen'
 import { useChatSocket } from './hooks/useChatSocket'
 import { usePendingMessages } from './hooks/usePendingMessages'
 import { initials } from './initials'
+import { upsertAuthoritativeMessage } from './messagesCache'
+import type { ErrorEvent, MessageAckEvent } from './realtime'
 
 /**
  * Root component: establishes the window-scoped current user before any
@@ -103,14 +105,57 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
   // ancestor of ThreadPane (renders it) and the socket handlers (6.4 mutates
   // it via `removePending`/`markPendingFailed`) — and is keyed to this
   // identity by the shell's `key`, so a user switch resets it automatically.
-  const { pendingMessages, addPending } = usePendingMessages()
+  const { pendingMessages, addPending, removePending, markPendingFailed } = usePendingMessages()
+
+  /**
+   * Task 6.4 pending→authoritative reconciliation. The backend ack always
+   * carries the command's `clientMessageId` alongside the authoritative
+   * message (backend `MessageAck` has a non-nullable `clientMessageId: UUID`),
+   * so correlation is direct.
+   *
+   * Exactly-once invariant: after an ack, the message appears ONCE — the
+   * pending bubble is removed AND the authoritative message enters the cache
+   * through the single keyed upsert (idempotent on server id), so neither a
+   * duplicate render nor a lost message is possible even if the same message
+   * later re-arrives via NEW_MESSAGE (6.5) or history (6.7).
+   */
+  const handleMessageAck = useCallback(
+    (event: MessageAckEvent) => {
+      removePending(event.clientMessageId)
+      upsertAuthoritativeMessage(user.id, event.message)
+    },
+    [removePending, user.id],
+  )
+
+  /**
+   * Task 6.4 failure path: a correlated error (`clientMessageId` present)
+   * flips the matching pending item to `failed` — the bubble stays rendered
+   * with the "Failed to send" status, is never retried, and is never removed.
+   * If no pending item matches (e.g. the ack already won the race),
+   * `markPendingFailed` is a harmless no-op. Uncorrelated errors (unparseable
+   * frames, etc.) carry no `clientMessageId` and are logged visibly.
+   */
+  const handleRealtimeError = useCallback(
+    (event: ErrorEvent) => {
+      if (event.clientMessageId !== undefined) {
+        markPendingFailed(event.clientMessageId)
+        return
+      }
+      console.warn(`[chat] uncorrelated realtime error ${event.code}: ${event.reason}`)
+    },
+    [markPendingFailed],
+  )
 
   // Realtime connection (task 6.2): the socket lifecycle is bound to this
   // identity — created once `currentUser` is established (this shell only
   // renders then) and terminated on user switch/unmount. `sendMessage` is
-  // consumed by the submit path below, event handlers by 6.4/6.5, and
-  // `connectionState` by the availability indicator in 6.6.
-  const { sendMessage } = useChatSocket(user.id)
+  // consumed by the submit path below, the ack/error handlers are 6.4 (wired
+  // here), `onNewMessage` remains unwired until 6.5, and `connectionState`
+  // feeds the availability indicator in 6.6.
+  const { sendMessage } = useChatSocket(user.id, {
+    onMessageAck: handleMessageAck,
+    onRealtimeError: handleRealtimeError,
+  })
 
   /**
    * Task 6.3 submit path. `content` arrives already boundary-trimmed and
