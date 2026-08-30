@@ -5,17 +5,17 @@ is never cut (slices 2–4 depend on it to be demonstrable).
 
 ## 1. Slice 0 — Contract and seed data
 
-- [ ] 1.1 Add `POST /api/conversations` (request/response, 200/201/400/401/404 semantics) to `docs/openapi.yaml`, documenting explicitly that `404` on this endpoint means the named `participantId` is not a directory user — distinct from `404` on `/conversations/{id}/messages`, which means the conversation does not exist
-- [ ] 1.2 Add the `CONVERSATION_CREATED` and `PRESENCE` events to `docs/openapi.yaml`
-- [ ] 1.3 Add `lastMessage` to the `Conversation` schema in `docs/openapi.yaml` as `nullable: true`, NOT listed under `required` (see 4.0 — the global `non_null` Jackson setting means the property is omitted, not null, for an empty history)
-- [ ] 1.4 Add `clientMessageId` to the `Message` schema in `docs/openapi.yaml`, replacing the "deliberately NOT" rationale paragraph with the reason for the reversal (do not delete the record of the original decision). Update the three *other* places that assert the omission so they cannot drift: the `MESSAGE_ACK`/`ERROR` correlation note in `docs/openapi.yaml`, the `MessageDto` KDoc, and the `OutboundEvent` KDoc
-- [ ] 1.5 Add a check that fails if `docs/openapi.yaml` does not parse as a valid OpenAPI document
-- [ ] 1.5a Mark each newly documented element `x-status: planned` in `docs/openapi.yaml`, and make removing that marker part of the slice that implements it (slice 2 for the endpoint and `CONVERSATION_CREATED`, slice 3 for `lastMessage`, slice 4 for `PRESENCE`, slice 6 for `clientMessageId`), so a partially shipped change never leaves the document asserting behaviour that does not exist
-- [ ] 1.5b Restructure `DataSeeder.run` into independent find-or-create steps per entity, removing the early `return` that skips all later seeding once the original conversation exists — otherwise none of 1.6–1.8 runs against an existing database
-- [ ] 1.6 Expand `SeedData.kt` with Carol, Dan, and Erin (new ids; existing ids and names unchanged)
-- [ ] 1.7 Seed the Alice↔Carol conversation with three messages using deterministic `clientMessageId`s and back-dated timestamps straddling a day boundary; leave the seeded Alice↔Bob conversation empty (the empty-history preview and empty-thread states depend on it)
+- [x] 1.1 Add `POST /api/conversations` (request/response, 200/201/400/401/404 semantics) to `docs/openapi.yaml`, documenting explicitly that `404` on this endpoint means the named `participantId` is not a directory user — distinct from `404` on `/conversations/{id}/messages`, which means the conversation does not exist
+- [x] 1.2 Add the `CONVERSATION_CREATED` and `PRESENCE` events to `docs/openapi.yaml`
+- [x] 1.3 Add `lastMessage` to the `Conversation` schema in `docs/openapi.yaml` as `nullable: true`, NOT listed under `required` (see 4.0 — the global `non_null` Jackson setting means the property is omitted, not null, for an empty history)
+- [x] 1.4 Add `clientMessageId` to the `Message` schema in `docs/openapi.yaml`, replacing the "deliberately NOT" rationale paragraph with the reason for the reversal (do not delete the record of the original decision). Update the three *other* places that assert the omission so they cannot drift: the `MESSAGE_ACK`/`ERROR` correlation note in `docs/openapi.yaml`, the `MessageDto` KDoc, and the `OutboundEvent` KDoc
+- [x] 1.5 Add a check that fails if `docs/openapi.yaml` does not parse as a valid OpenAPI document
+- [x] 1.5a Mark each newly documented element `x-status: planned` in `docs/openapi.yaml`, and make removing that marker part of the slice that implements it (slice 2 for the endpoint and `CONVERSATION_CREATED`, slice 3 for `lastMessage`, slice 4 for `PRESENCE`, slice 6 for `clientMessageId`), so a partially shipped change never leaves the document asserting behaviour that does not exist
+- [x] 1.5b Restructure `DataSeeder.run` into independent find-or-create steps per entity, removing the early `return` that skips all later seeding once the original conversation exists — otherwise none of 1.6–1.8 runs against an existing database
+- [x] 1.6 Expand `SeedData.kt` with Carol, Dan, and Erin (new ids; existing ids and names unchanged)
+- [x] 1.7 Seed the Alice↔Carol conversation with three messages using deterministic `clientMessageId`s and back-dated timestamps straddling a day boundary; leave the seeded Alice↔Bob conversation empty (the empty-history preview and empty-thread states depend on it)
 - [ ] 1.8 Add `pairKey` backfill to `DataSeeder` for pre-existing 1:1 conversations lacking one
-- [ ] 1.9 Verify boot against a previously seeded database (retained Docker volume) adds the new data without recreation
+- [x] 1.9 Verify boot against a previously seeded database (retained Docker volume) adds the new data without recreation
 
 ## 2. Slice 1 — Shell re-skin
 

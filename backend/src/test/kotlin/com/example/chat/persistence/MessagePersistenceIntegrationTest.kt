@@ -263,16 +263,29 @@ class MessagePersistenceIntegrationTest {
         dataSeeder.run(args)
         dataSeeder.run(args)
 
-        // 2 fixture users from setUp() + 2 fixed-id seed users, never duplicated.
-        assertThat(appUserRepository.count()).isEqualTo(4)
+        // 2 fixture users from setUp() + 5 fixed-id seed users
+        // (Alice, Bob, Carol, Dan, Erin), never duplicated.
+        assertThat(appUserRepository.count()).isEqualTo(7)
         assertThat(appUserRepository.findById(SeedData.ALICE_ID)).isPresent
         assertThat(appUserRepository.findById(SeedData.BOB_ID)).isPresent
+        assertThat(appUserRepository.findById(SeedData.CAROL_ID)).isPresent
+        assertThat(appUserRepository.findById(SeedData.DAN_ID)).isPresent
+        assertThat(appUserRepository.findById(SeedData.ERIN_ID)).isPresent
 
-        // 1 fixture conversation from setUp() + 1 fixed-id seed conversation, never duplicated.
-        assertThat(conversationRepository.count()).isEqualTo(2)
+        // 1 fixture conversation from setUp() + 2 fixed-id seed conversations
+        // (Alice<->Bob, Alice<->Carol), never duplicated.
+        assertThat(conversationRepository.count()).isEqualTo(3)
         val seededConversation = conversationRepository.findById(SeedData.CONVERSATION_ID).orElseThrow()
         assertThat(seededConversation.participants.map { it.id })
             .containsExactlyInAnyOrder(SeedData.ALICE_ID, SeedData.BOB_ID)
+
+        val aliceCarolConversation = conversationRepository.findById(SeedData.ALICE_CAROL_CONVERSATION_ID)
+            .orElseThrow()
+        assertThat(aliceCarolConversation.participants.map { it.id })
+            .containsExactlyInAnyOrder(SeedData.ALICE_ID, SeedData.CAROL_ID)
+        assertThat(
+            messageRepository.findByConversation_IdOrderByCreatedAtAscIdAsc(SeedData.ALICE_CAROL_CONVERSATION_ID),
+        ).hasSize(3)
     }
 }
 

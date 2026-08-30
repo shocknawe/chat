@@ -11,10 +11,19 @@ import java.util.UUID
  * (design.md: "Explicit protocol modelled as sealed Kotlin types").
  *
  * All three events reuse the authoritative REST [MessageDto] shape
- * (`{ id, conversationId, senderId, content, createdAt }`); `clientMessageId`
- * is carried alongside it only in [MessageAck] and [ErrorEvent] as a
- * correlation token, never inside the message payload itself (design.md,
- * the DTO shape note).
+ * (`{ id, conversationId, senderId, content, createdAt }`). `clientMessageId`
+ * was originally carried alongside it only in [MessageAck] and [ErrorEvent]
+ * as a correlation token, never inside the message payload itself
+ * (design.md, the DTO shape note). **That omission is reversed**
+ * (`add-conversation-creation-presence-inspector` design.md decision 6): the
+ * token is planned to move onto [MessageDto] itself, so every event carrying
+ * a message — including `NEW_MESSAGE` for a message sent by another
+ * participant — exposes it honestly. [MessageAck.clientMessageId] and
+ * [ErrorEvent.clientMessageId] remain at the event level for existing
+ * consumers that correlate on them (redundant with `message.clientMessageId`
+ * on `MessageAck` once that field exists). Exposure is **planned but not yet
+ * implemented** — [MessageDto] does not yet declare the field (Slice 0 of
+ * that change is contract/documentation only; adding the field is Slice 6).
  */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
 @JsonSubTypes(

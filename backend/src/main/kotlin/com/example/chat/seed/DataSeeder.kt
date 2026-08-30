@@ -2,28 +2,42 @@ package com.example.chat.seed
 
 import com.example.chat.domain.AppUser
 import com.example.chat.domain.Conversation
+import com.example.chat.domain.Message
 import com.example.chat.repository.AppUserRepository
 import com.example.chat.repository.ConversationRepository
+import com.example.chat.repository.MessageRepository
 import org.slf4j.LoggerFactory
 import org.springframework.boot.ApplicationArguments
 import org.springframework.boot.ApplicationRunner
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
+import java.time.Instant
+import java.util.UUID
 
 /**
- * Idempotently seeds the two fixed-id MVP demo users ([SeedData.ALICE_ID],
- * [SeedData.BOB_ID]) and their pre-created conversation
- * ([SeedData.CONVERSATION_ID]) on every application boot.
+ * Idempotently seeds the fixed-id MVP demo directory (users, conversations,
+ * and the Alice&harr;Carol message history) on every application boot.
  *
  * "Idempotent" here means upsert-by-fixed-id: each entity is looked up by
- * its known id first and only created if absent, so repeated boots against
- * the same database never produce duplicate rows (design.md, "Docker
- * Compose topology").
+ * its known id (or, for messages, its known `(sender, clientMessageId)`
+ * pair) first and only created if absent, so repeated boots against the
+ * same database never produce duplicate rows (design.md, "Docker Compose
+ * topology").
+ *
+ * Every seeded entity is evaluated **independently** — there is no early
+ * return once some earlier entity is found to already exist. This matters
+ * because the seed data has grown across changes: a database seeded by an
+ * earlier version of this class (e.g. only Alice, Bob, and
+ * [SeedData.CONVERSATION_ID]) must still receive every later addition
+ * (Carol/Dan/Erin, the Alice&harr;Carol conversation, its messages) on the
+ * next boot, rather than short-circuiting on the pre-existing conversation
+ * (demo-seed-data spec, "Seeding is step-wise idempotent").
  */
 @Component
 class DataSeeder(
     private val appUserRepository: AppUserRepository,
     private val conversationRepository: ConversationRepository,
+    private val messageRepository: MessageRepository,
 ) : ApplicationRunner {
 
     private val log = LoggerFactory.getLogger(DataSeeder::class.java)
@@ -32,28 +46,89 @@ class DataSeeder(
     override fun run(args: ApplicationArguments) {
         val alice = findOrCreateUser(SeedData.ALICE_ID, SeedData.ALICE_DISPLAY_NAME)
         val bob = findOrCreateUser(SeedData.BOB_ID, SeedData.BOB_DISPLAY_NAME)
+        val carol = findOrCreateUser(SeedData.CAROL_ID, SeedData.CAROL_DISPLAY_NAME)
+        findOrCreateUser(SeedData.DAN_ID, SeedData.DAN_DISPLAY_NAME)
+        findOrCreateUser(SeedData.ERIN_ID, SeedData.ERIN_DISPLAY_NAME)
 
-        if (conversationRepository.existsById(SeedData.CONVERSATION_ID)) {
-            log.debug("Seed conversation {} already present; skipping", SeedData.CONVERSATION_ID)
-            return
-        }
+        // Alice <-> Bob: the original MVP conversation. Deliberately left
+        // with no messages so the empty-history preview and empty-thread
+        // states remain reachable in the seeded demo (design.md decision 1).
+        findOrCreateConversation(SeedData.CONVERSATION_ID, alice, bob)
 
-        val conversation = Conversation(id = SeedData.CONVERSATION_ID)
-        conversation.participants += alice
-        conversation.participants += bob
-        conversationRepository.save(conversation)
-        log.info(
-            "Seeded MVP conversation {} between '{}' and '{}'",
-            SeedData.CONVERSATION_ID,
-            alice.displayName,
-            bob.displayName,
+        // Alice <-> Carol: seeded with a non-empty history so a rail preview
+        // and a rendered date divider are both reachable.
+        val aliceCarolConversation = findOrCreateConversation(SeedData.ALICE_CAROL_CONVERSATION_ID, alice, carol)
+        findOrCreateMessage(
+            conversation = aliceCarolConversation,
+            sender = alice,
+            clientMessageId = SeedData.ALICE_CAROL_MESSAGE_1_CLIENT_ID,
+            content = "Hey Carol, are we still on for tomorrow?",
+            createdAt = SeedData.ALICE_CAROL_MESSAGE_1_CREATED_AT,
         )
+        findOrCreateMessage(
+            conversation = aliceCarolConversation,
+            sender = carol,
+            clientMessageId = SeedData.ALICE_CAROL_MESSAGE_2_CLIENT_ID,
+            content = "Yes! Looking forward to it.",
+            createdAt = SeedData.ALICE_CAROL_MESSAGE_2_CREATED_AT,
+        )
+        findOrCreateMessage(
+            conversation = aliceCarolConversation,
+            sender = alice,
+            clientMessageId = SeedData.ALICE_CAROL_MESSAGE_3_CLIENT_ID,
+            content = "Great, see you then.",
+            createdAt = SeedData.ALICE_CAROL_MESSAGE_3_CREATED_AT,
+        )
+
+        // Dan and Erin are seeded with no conversations at all, guaranteeing
+        // at least one directory pair shares no conversation (demo-seed-data
+        // spec, "Directory contains reachable new-conversation candidates").
     }
 
-    private fun findOrCreateUser(id: java.util.UUID, displayName: String): AppUser {
+    private fun findOrCreateUser(id: UUID, displayName: String): AppUser {
         return appUserRepository.findById(id).orElseGet {
-            log.info("Seeding MVP user {} ('{}')", id, displayName)
+            log.info("Seeding user {} ('{}')", id, displayName)
             appUserRepository.save(AppUser(id = id, displayName = displayName))
+        }
+    }
+
+    private fun findOrCreateConversation(id: UUID, vararg participants: AppUser): Conversation {
+        return conversationRepository.findById(id).orElseGet {
+            val conversation = Conversation(id = id)
+            conversation.participants += participants
+            val saved = conversationRepository.save(conversation)
+            log.info(
+                "Seeded conversation {} between {}",
+                id,
+                participants.joinToString(", ") { it.displayName },
+            )
+            saved
+        }
+    }
+
+    private fun findOrCreateMessage(
+        conversation: Conversation,
+        sender: AppUser,
+        clientMessageId: UUID,
+        content: String,
+        createdAt: Instant,
+    ): Message {
+        return messageRepository.findBySender_IdAndClientMessageId(sender.id, clientMessageId) ?: run {
+            val message = Message(
+                conversation = conversation,
+                sender = sender,
+                clientMessageId = clientMessageId,
+                content = content,
+                createdAt = createdAt,
+            )
+            val saved = messageRepository.save(message)
+            log.info(
+                "Seeded message {} ({} -> conversation {})",
+                saved.id,
+                sender.displayName,
+                conversation.id,
+            )
+            saved
         }
     }
 }
