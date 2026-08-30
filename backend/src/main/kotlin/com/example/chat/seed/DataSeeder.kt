@@ -32,6 +32,15 @@ import java.util.UUID
  * (Carol/Dan/Erin, the Alice&harr;Carol conversation, its messages) on the
  * next boot, rather than short-circuiting on the pre-existing conversation
  * (demo-seed-data spec, "Seeding is step-wise idempotent").
+ *
+ * The run ends with a repair pass for rows that predate later schema additions
+ * ([backfillPairKeys], `add-conversation-creation-presence-inspector` task
+ * 1.8): a retained database is caught up on every boot rather than by hand.
+ *
+ * Note that this class runs as an *unordered* `ApplicationRunner`, i.e. after
+ * [com.example.chat.startup.PairKeyUniqueConstraintValidator] — deliberate:
+ * the backfill must not write `pairKey` values into a table whose
+ * pair-uniqueness constraint has not been asserted to exist.
  */
 @Component
 class DataSeeder(
@@ -83,6 +92,8 @@ class DataSeeder(
         // Dan and Erin are seeded with no conversations at all, guaranteeing
         // at least one directory pair shares no conversation (demo-seed-data
         // spec, "Directory contains reachable new-conversation candidates").
+
+        backfillPairKeys()
     }
 
     private fun findOrCreateUser(id: UUID, displayName: String): AppUser {
@@ -94,7 +105,15 @@ class DataSeeder(
 
     private fun findOrCreateConversation(id: UUID, vararg participants: AppUser): Conversation {
         return conversationRepository.findById(id).orElseGet {
-            val conversation = Conversation(id = id)
+            // A 1:1 conversation is created with its pair key immediately, so
+            // a freshly seeded database never relies on the backfill below;
+            // group-shaped seeds (none today) would have no key to set.
+            val conversation = Conversation(
+                id = id,
+                pairKey = participants
+                    .takeIf { it.size == 2 }
+                    ?.let { Conversation.pairKeyFor(it[0].id, it[1].id) },
+            )
             conversation.participants += participants
             val saved = conversationRepository.save(conversation)
             log.info(
@@ -103,6 +122,43 @@ class DataSeeder(
                 participants.joinToString(", ") { it.displayName },
             )
             saved
+        }
+    }
+
+    /**
+     * `add-conversation-creation-presence-inspector` task 1.8 (deferred from
+     * slice 0): fills in [Conversation.pairKey] on 1:1 conversations that were
+     * persisted *before* that column existed, e.g. a database kept across the
+     * upgrade (the retained docker-compose volume).
+     *
+     * Non-destructive and idempotent by construction: only rows whose
+     * `pair_key` is still `NULL` are selected, and a row is only ever given
+     * the canonical key of the participants it already has
+     * ([Conversation.pairKeyFor] — the same computation the REST creation path
+     * uses, so an inserted conversation and its backfilled twin cannot disagree).
+     * Nothing is deleted, no id or participant changes, and on every boot after
+     * the first this is a no-op query.
+     *
+     * Only exactly-two-participant conversations are keyed: `pair_key` models
+     * *pair* uniqueness (a nullable unique column is forward-compatible with
+     * group conversations precisely because they have no pair to be unique
+     * about), so any other shape is left for its own change to decide.
+     */
+    private fun backfillPairKeys() {
+        val backfilled = conversationRepository.findByPairKeyIsNull().count { conversation ->
+            val participantIds = conversation.participants.map { it.id }
+            if (participantIds.size != 2) return@count false
+            conversation.pairKey = Conversation.pairKeyFor(participantIds[0], participantIds[1])
+            conversationRepository.save(conversation)
+            log.info(
+                "Backfilled pairKey '{}' onto pre-existing conversation {}",
+                conversation.pairKey,
+                conversation.id,
+            )
+            true
+        }
+        if (backfilled > 0) {
+            log.info("Backfilled pairKey onto {} pre-existing 1:1 conversation(s)", backfilled)
         }
     }
 

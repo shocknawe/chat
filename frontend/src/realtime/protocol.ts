@@ -20,7 +20,7 @@
  * the `?userId=` handshake and ignores any client-supplied sender field.
  */
 
-import type { Message } from '../api'
+import type { Conversation, Message } from '../api'
 
 /** Client -> server command to create a message. */
 export interface SendMessageCommand {
@@ -59,8 +59,20 @@ export interface ErrorEvent {
   reason: string
 }
 
+/**
+ * Sent to every active connection of the OTHER participant after
+ * `POST /api/conversations` commits a new conversation — never to the creator,
+ * who already holds the REST response, and never for the 200 (already-existed)
+ * case. The embedded conversation reuses the REST `Conversation` shape and has
+ * an empty history (task 3.9 renders it with an empty rail preview).
+ */
+export interface ConversationCreatedEvent {
+  type: 'CONVERSATION_CREATED'
+  conversation: Conversation
+}
+
 /** Union of every event the server can send. */
-export type InboundEvent = MessageAckEvent | NewMessageEvent | ErrorEvent
+export type InboundEvent = MessageAckEvent | NewMessageEvent | ErrorEvent | ConversationCreatedEvent
 
 /**
  * Stable, machine-readable ERROR codes (mirror of the backend `ErrorCodes`
@@ -103,6 +115,20 @@ function isMessage(value: unknown): value is Message {
     typeof value.senderId === 'string' &&
     typeof value.content === 'string' &&
     typeof value.createdAt === 'string'
+  )
+}
+
+/** Mirrors the REST `User`/`Conversation` DTOs shared with `../api.ts`. */
+function isUser(value: unknown): value is Conversation['participants'][number] {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.displayName === 'string'
+}
+
+function isConversation(value: unknown): value is Conversation {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    Array.isArray(value.participants) &&
+    value.participants.every(isUser)
   )
 }
 
@@ -160,6 +186,16 @@ export function parseInboundEvent(raw: string): InboundEvent | null {
         ...(typeof json.clientMessageId === 'string'
           ? { clientMessageId: json.clientMessageId }
           : {}),
+      }
+      return event
+    }
+    case 'CONVERSATION_CREATED': {
+      if (!isConversation(json.conversation)) {
+        return null
+      }
+      const event: ConversationCreatedEvent = {
+        type: 'CONVERSATION_CREATED',
+        conversation: json.conversation,
       }
       return event
     }

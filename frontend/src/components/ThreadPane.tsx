@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef } from 'react'
+import { Fragment, useEffect, useMemo, useRef, type MutableRefObject } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { type Conversation, type Message, type User } from '../api'
 import { conversationLabel } from './ConversationList'
@@ -115,9 +115,20 @@ interface ThreadPaneProps {
   pendingMessages: PendingMessage[]
   /** Submits a boundary-trimmed, non-empty draft for `conversation`. */
   onSendMessage: (content: string) => void
+  /**
+   * Programmatic handle to the composer textarea (task 3.7): after a new
+   * conversation is created via the `+` dialog, focus moves here.
+   */
+  composerFocusRef?: MutableRefObject<HTMLTextAreaElement | null>
 }
 
-export function ThreadPane({ currentUser, conversation, pendingMessages, onSendMessage }: ThreadPaneProps) {
+export function ThreadPane({
+  currentUser,
+  conversation,
+  pendingMessages,
+  onSendMessage,
+  composerFocusRef,
+}: ThreadPaneProps) {
   // Task 6.7: history lands through the REST↔realtime MERGE, not a blind
   // overwrite. `fetchMergedHistory` unions the response with whatever ack /
   // NEW_MESSAGE upserts landed in this cache entry while the fetch was in
@@ -403,6 +414,7 @@ export function ThreadPane({ currentUser, conversation, pendingMessages, onSendM
       <Composer
         ariaLabel={`Message to ${otherName}`}
         onSubmit={onSendMessage}
+        focusRef={composerFocusRef}
       />
     </section>
   )

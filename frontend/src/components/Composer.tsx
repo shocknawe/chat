@@ -1,4 +1,11 @@
-import { useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type MutableRefObject,
+} from 'react'
 
 /**
  * Message length cap, mirroring the backend's authoritative
@@ -40,12 +47,26 @@ interface ComposerProps {
   /** Announces which conversation the message goes to (screen readers). */
   ariaLabel: string
   onSubmit: (content: string) => void
+  /**
+   * Optional external handle to the textarea for programmatic focus —
+   * task 3.7 moves focus here after a conversation is created from the
+   * `+` dialog. Merged with the internal auto-grow ref below. Mutable: this
+   * component writes the textarea node into it on mount.
+   */
+  focusRef?: MutableRefObject<HTMLTextAreaElement | null>
 }
 
-export function Composer({ ariaLabel, onSubmit }: ComposerProps) {
+export function Composer({ ariaLabel, onSubmit, focusRef }: ComposerProps) {
   const [draft, setDraft] = useState('')
   const canSend = draft.trim() !== ''
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  const setTextareaRef = (node: HTMLTextAreaElement | null): void => {
+    textareaRef.current = node
+    if (focusRef !== undefined) {
+      focusRef.current = node
+    }
+  }
 
   useLayoutEffect(() => {
     const node = textareaRef.current
@@ -78,7 +99,7 @@ export function Composer({ ariaLabel, onSubmit }: ComposerProps) {
   return (
     <form className="composer" onSubmit={handleFormSubmit}>
       <textarea
-        ref={textareaRef}
+        ref={setTextareaRef}
         className="composer-input"
         aria-label={ariaLabel}
         placeholder="Write a message…"

@@ -42,36 +42,59 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Reads a human-readable reason out of an error response body. Both shapes
+ * the backend emits are accepted: Spring's ProblemDetail (`application/problem+json`)
+ * carries its reason in `detail`, while other JSON failures may carry `message`.
+ * The raw status line is the last resort.
+ */
 async function readErrorMessage(response: Response): Promise<string> {
   const contentType = response.headers.get('content-type') ?? ''
-  if (contentType.includes('application/json')) {
+  if (contentType.includes('json')) {
     const body: unknown = await response.json().catch(() => undefined)
-    if (
-      typeof body === 'object' &&
-      body !== null &&
-      'message' in body &&
-      typeof (body as { message: unknown }).message === 'string'
-    ) {
-      return (body as { message: string }).message
+    if (typeof body === 'object' && body !== null) {
+      const record = body as Record<string, unknown>
+      for (const field of ['message', 'detail'] as const) {
+        const value = record[field]
+        if (typeof value === 'string' && value.trim() !== '') {
+          return value
+        }
+      }
     }
   }
   return `${response.status} ${response.statusText}`.trim()
 }
 
+/** Options for a non-GET request: the method and an optional JSON body. */
+interface RequestInit {
+  method?: 'GET' | 'POST'
+  /** Serialized as the request's JSON body (`Content-Type: application/json`). */
+  body?: unknown
+}
+
 /**
  * Performs a JSON request. `userId`, when provided, is sent as `X-User-Id`,
  * which is how the backend binds the window-scoped demo identity on
- * protected endpoints.
+ * protected endpoints. `init` carries the method and JSON body for writes
+ * (task 3.4a: `POST /api/conversations` was the first non-GET consumer).
  */
-async function request<T>(path: string, userId?: string): Promise<T> {
+async function request<T>(path: string, userId?: string, init?: RequestInit): Promise<T> {
   const headers = new Headers({ Accept: 'application/json' })
   if (userId !== undefined) {
     headers.set('X-User-Id', userId)
   }
+  const jsonBody = init?.body !== undefined ? JSON.stringify(init.body) : undefined
+  if (jsonBody !== undefined) {
+    headers.set('Content-Type', 'application/json')
+  }
 
   let response: Response
   try {
-    response = await fetch(path, { headers })
+    response = await fetch(path, {
+      headers,
+      method: init?.method ?? 'GET',
+      ...(jsonBody !== undefined ? { body: jsonBody } : {}),
+    })
   } catch {
     throw new ApiError(0, 'Could not reach the server — is the backend running?')
   }
@@ -90,6 +113,26 @@ export function fetchUsers(): Promise<User[]> {
 /** Protected: only conversations in which `userId` participates. */
 export function fetchConversations(userId: string): Promise<Conversation[]> {
   return request<Conversation[]>('/api/conversations', userId)
+}
+
+/**
+ * Protected (task 3.4a): starts — or reuses — a 1:1 conversation between
+ * `userId` (the implicit caller, bound via `X-User-Id`) and `participantId`.
+ *
+ * The endpoint is idempotent and answers BOTH success statuses with the
+ * conversation: 201 when a new conversation was created, 200 when one
+ * between the pair already existed. Callers therefore treat the result
+ * uniformly; the status distinction never escapes this function.
+ *
+ * Rejections follow the shared error conventions: 400/401/404 arrive as
+ * `ApiError` carrying the ProblemDetail reason, and transport failure as
+ * `ApiError(0, …)` — the UI states all three in words (task 3.7).
+ */
+export function createConversation(userId: string, participantId: string): Promise<Conversation> {
+  return request<Conversation>('/api/conversations', userId, {
+    method: 'POST',
+    body: { participantId },
+  })
 }
 
 /**

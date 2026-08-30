@@ -29,6 +29,7 @@ import {
   createChatSocket,
   type ChatSocket,
   type ConnectionState,
+  type ConversationCreatedEvent,
   type ErrorEvent,
   type InboundEvent,
   type MessageAckEvent,
@@ -49,6 +50,8 @@ export interface RealtimeEventHandlers {
   onNewMessage?: (event: NewMessageEvent) => void
   /** Correlated protocol/validation/persistence rejection. */
   onRealtimeError?: (event: ErrorEvent) => void
+  /** A new conversation this user participates in (task 3.9: rail update). */
+  onConversationCreated?: (event: ConversationCreatedEvent) => void
 }
 
 export interface UseChatSocketResult {
@@ -75,6 +78,9 @@ function dispatchRealtimeEvent(handlers: RealtimeEventHandlers, event: InboundEv
       break
     case 'ERROR':
       handlers.onRealtimeError?.(event)
+      break
+    case 'CONVERSATION_CREATED':
+      handlers.onConversationCreated?.(event)
       break
   }
 }

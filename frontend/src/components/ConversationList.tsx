@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 import type { Conversation } from '../api'
 import { initials } from '../initials'
 
@@ -45,6 +45,16 @@ interface ConversationListProps {
   isCompact?: boolean
   /** True while the rail overlay is the currently open overlay. Meaningless when `isCompact` is false. */
   isOverlayOpen?: boolean
+  /**
+   * Task 3.5: opens the new-conversation dialog. Control lives in the rail's
+   * heading per spec; rendered (and the dialog's focus-return target) only
+   * when provided.
+   */
+  onNewConversation?: () => void
+  /** Handle to the `+` control for the shell's focus return on dialog dismissal (task 3.6). */
+  newConversationButtonRef?: RefObject<HTMLButtonElement>
+  /** True while the creation dialog is the currently open overlay. */
+  isNewConversationOpen?: boolean
 }
 
 export function ConversationList({
@@ -57,6 +67,9 @@ export function ConversationList({
   onSelect,
   isCompact = false,
   isOverlayOpen = false,
+  onNewConversation,
+  newConversationButtonRef,
+  isNewConversationOpen = false,
 }: ConversationListProps) {
   const navRef = useRef<HTMLElement | null>(null)
   const isOffCanvas = isCompact && !isOverlayOpen
@@ -77,9 +90,31 @@ export function ConversationList({
 
   return (
     <nav ref={navRef} id="conversation-rail" className={className} aria-labelledby="rail-title">
-      <h2 id="rail-title" className="title rail-title">
-        Conversations
-      </h2>
+      <div className="rail-heading">
+        <h2 id="rail-title" className="title rail-title">
+          Conversations
+        </h2>
+        {/* Task 3.5: the creation control lives in the rail heading. The
+            shell owns ref + `aria-expanded` so dismissal of the dialog it
+            opens can return focus here (task 3.6).
+        */}
+        {onNewConversation !== undefined && (
+          <button
+            ref={newConversationButtonRef}
+            type="button"
+            className="icon-button rail-new"
+            aria-label="New conversation"
+            title="New conversation"
+            aria-haspopup="dialog"
+            aria-expanded={isNewConversationOpen}
+            onClick={onNewConversation}
+          >
+            <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
+      </div>
 
       {isPending && (
         <div className="rail-loading">

@@ -579,7 +579,183 @@ body[data-theme='dark'] .btn-ghost:hover {
   cursor: pointer;
 }
 
-/* ── Workspace: rail + thread ───────────────────────────────────────── */
+/* ── Creation dialog (tasks 3.5–3.8) ────────────────────────────────── */
+
+/* Visual source: the one-shot's `newConversationGate` overlay (pale-blue veil
+   with brand radial tints, white raised panel, roomy option tiles). The
+   backdrop is a plain wrapper; the dismissal surface is a real <button>
+   (`dialog-scrim`) exactly like the rail's `.scrim`, but `tabindex="-1"`
+   because focus is confined INSIDE the panel while the dialog is open. */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  overflow-y: auto;
+}
+
+.dialog-scrim {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  background:
+    radial-gradient(34rem 28rem at 8% 4%, rgba(170, 65, 175, 0.18), transparent 68%),
+    radial-gradient(32rem 30rem at 96% 10%, rgba(0, 165, 230, 0.18), transparent 65%),
+    rgba(234, 244, 255, 0.94);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+body[data-theme='dark'] .dialog-scrim {
+  background:
+    radial-gradient(34rem 28rem at 8% 4%, rgba(170, 65, 175, 0.2), transparent 68%),
+    radial-gradient(32rem 30rem at 96% 10%, rgba(0, 165, 230, 0.15), transparent 65%),
+    rgba(11, 8, 19, 0.95);
+}
+
+.create-conversation-dialog {
+  position: relative;
+  width: min(100%, 440px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 28px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+}
+
+body[data-theme='dark'] .create-conversation-dialog {
+  background: rgba(23, 16, 38, 0.96);
+}
+
+.create-conversation-dialog:focus {
+  outline: none;
+}
+
+.create-conversation-dialog .dialog-title:focus {
+  outline: none;
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+}
+
+.dialog-lead {
+  margin: 0;
+}
+
+/* Failed attempt (task 3.7): stated in words, on the danger tint, with the
+   server's own reason kept as the quieter detail line. */
+.dialog-error {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--danger-line);
+  border-radius: 12px;
+  background: var(--danger-bg);
+}
+
+.dialog-error-title {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.dialog-error-detail {
+  margin: 0;
+}
+
+.dialog-status {
+  margin: 0;
+}
+
+.dialog-candidates {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* Option tile, carried over from the one-shot's identity options. The
+   in-flight status word (task 3.8) sits in the trailing column. */
+.dialog-candidate {
+  width: 100%;
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--ink);
+  background: var(--blue-soft);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  cursor: pointer;
+  transition:
+    background-color 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    transform 0.18s var(--ease);
+}
+
+.dialog-candidate:hover:not(:disabled) {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  transform: translateX(2px);
+}
+
+body[data-theme='dark'] .dialog-candidate {
+  background: var(--paper);
+}
+
+.dialog-candidate:disabled {
+  color: var(--ink-3);
+  cursor: progress;
+}
+
+.dialog-candidate-name {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog-candidate-status {
+  white-space: nowrap;
+}
+
+/* Exhausted directory (task 3.5): words, not an empty list. */
+.dialog-empty {
+  margin: 0;
+  padding: 16px;
+  color: var(--ink-2);
+  background: var(--blue-soft);
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.dialog-cancel {
+  width: 100%;
+}
 
 .shell-body {
   display: grid;
@@ -610,6 +786,29 @@ body[data-theme='dark'] .btn-ghost:hover {
 
 body[data-theme='dark'] .rail {
   background: rgba(18, 12, 31, 0.94);
+}
+
+/* Heading row (task 3.5): the rail title and, at its end, the `+` creation
+   control. The title's own rule below keeps its pre-control metrics for any
+   heading that has no control. */
+.rail-heading {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rail-heading .rail-title {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  border-bottom: 0;
+}
+
+.rail-heading .rail-new {
+  flex: none;
 }
 
 .rail-title {

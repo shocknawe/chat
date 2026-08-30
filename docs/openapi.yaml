@@ -105,7 +105,6 @@ paths:
     post:
       tags: [Conversations]
       summary: Create (or reuse) a 1:1 conversation with another user
-      x-status: planned
       description: |
         Starts a conversation between the caller (implicit, from `X-User-Id` — there is
         no request field for it and no `403` on this endpoint, since the intent "open a
@@ -385,7 +384,6 @@ paths:
                 code: "INVALID_CONTENT"
                 reason: "Message content must not be blank."
             CONVERSATION_CREATED:
-              x-status: planned
               description: |
                 Sent after `POST /api/conversations` commits a *new* conversation, to
                 every active connection of the *other* participant only — never to the

@@ -14,7 +14,7 @@ is never cut (slices 2–4 depend on it to be demonstrable).
 - [x] 1.5b Restructure `DataSeeder.run` into independent find-or-create steps per entity, removing the early `return` that skips all later seeding once the original conversation exists — otherwise none of 1.6–1.8 runs against an existing database
 - [x] 1.6 Expand `SeedData.kt` with Carol, Dan, and Erin (new ids; existing ids and names unchanged)
 - [x] 1.7 Seed the Alice↔Carol conversation with three messages using deterministic `clientMessageId`s and back-dated timestamps straddling a day boundary; leave the seeded Alice↔Bob conversation empty (the empty-history preview and empty-thread states depend on it)
-- [ ] 1.8 Add `pairKey` backfill to `DataSeeder` for pre-existing 1:1 conversations lacking one
+- [x] 1.8 Add `pairKey` backfill to `DataSeeder` for pre-existing 1:1 conversations lacking one
 - [x] 1.9 Verify boot against a previously seeded database (retained Docker volume) adds the new data without recreation
 
 ## 2. Slice 1 — Shell re-skin
@@ -30,20 +30,20 @@ is never cut (slices 2–4 depend on it to be demonstrable).
 
 ## 3. Slice 2 — Conversation creation
 
-- [ ] 3.1 Add nullable `pairKey` to the `Conversation` entity (sorted-UUID pair, e.g. `"1111…:2222…"`) with an explicit *table-level* unique constraint (`@Table(uniqueConstraints = [...])`, named `uq_conversation_pair_key`), mirroring the proven `Message` pattern — not a bare `@Column(unique = true)`
-- [ ] 3.1a Assert at boot that `uq_conversation_pair_key` exists, failing fast if it does not: `ddl-auto: update` is not guaranteed to add a unique constraint to a table that already exists, and without the constraint the race defence in 3.3 silently does nothing
-- [ ] 3.1b Run 3.1a's check against a database created *before* this change (retained volume), not only against a freshly created schema
-- [ ] 3.2 Implement `POST /api/conversations` in service/controller: implicit caller, 201 create / 200 existing, 400/401/404 rejections
-- [ ] 3.3 Handle the concurrent-create race: put the transactional insert in its own Spring bean (mirroring `MessageWriter`) so the catch and re-read genuinely run outside the rolled-back transaction; `saveAndFlush` so the violation surfaces synchronously; catch `DataIntegrityViolationException` at the service boundary and re-read in a fresh transaction, returning 200
-- [ ] 3.4 Emit `CONVERSATION_CREATED` after commit to every active connection of the other participant only
-- [ ] 3.4a Extend `api.ts` `request()` to carry a method and JSON body (it is GET-only today), and add `createConversation(userId, participantId)` returning the created-or-existing conversation
-- [ ] 3.5 Build the `+` dialog: candidate list (directory minus caller and existing partners), exhausted-state copy
-- [ ] 3.6 Confine focus in the dialog; return focus to the `+` button on dismissal
-- [ ] 3.7 On success: close, select conversation, move focus to composer, announce; on failure: keep open with reason in words, no rail mutation
-- [ ] 3.8 Add in-flight duplicate-submission guard per person
-- [ ] 3.9 Handle incoming `CONVERSATION_CREATED`: add to rail with empty preview without changing the active conversation
-- [ ] 3.10 Integration test: concurrent creation for the same pair yields exactly one persisted conversation and two successful responses
-- [ ] 3.11 Integration test: `CONVERSATION_CREATED` reaches the other participant's connections and not the creator's
+- [x] 3.1 Add nullable `pairKey` to the `Conversation` entity (sorted-UUID pair, e.g. `"1111…:2222…"`) with an explicit *table-level* unique constraint (`@Table(uniqueConstraints = [...])`, named `uq_conversation_pair_key`), mirroring the proven `Message` pattern — not a bare `@Column(unique = true)`
+- [x] 3.1a Assert at boot that `uq_conversation_pair_key` exists, failing fast if it does not: `ddl-auto: update` is not guaranteed to add a unique constraint to a table that already exists, and without the constraint the race defence in 3.3 silently does nothing
+- [x] 3.1b Run 3.1a's check against a database created *before* this change (retained volume), not only against a freshly created schema
+- [x] 3.2 Implement `POST /api/conversations` in service/controller: implicit caller, 201 create / 200 existing, 400/401/404 rejections
+- [x] 3.3 Handle the concurrent-create race: put the transactional insert in its own Spring bean (mirroring `MessageWriter`) so the catch and re-read genuinely run outside the rolled-back transaction; `saveAndFlush` so the violation surfaces synchronously; catch `DataIntegrityViolationException` at the service boundary and re-read in a fresh transaction, returning 200
+- [x] 3.4 Emit `CONVERSATION_CREATED` after commit to every active connection of the other participant only
+- [x] 3.4a Extend `api.ts` `request()` to carry a method and JSON body (it is GET-only today), and add `createConversation(userId, participantId)` returning the created-or-existing conversation
+- [x] 3.5 Build the `+` dialog: candidate list (directory minus caller and existing partners), exhausted-state copy
+- [x] 3.6 Confine focus in the dialog; return focus to the `+` button on dismissal
+- [x] 3.7 On success: close, select conversation, move focus to composer, announce; on failure: keep open with reason in words, no rail mutation
+- [x] 3.8 Add in-flight duplicate-submission guard per person
+- [x] 3.9 Handle incoming `CONVERSATION_CREATED`: add to rail with empty preview without changing the active conversation
+- [x] 3.10 Integration test: concurrent creation for the same pair yields exactly one persisted conversation and two successful responses
+- [x] 3.11 Integration test: `CONVERSATION_CREATED` reaches the other participant's connections and not the creator's
 
 ## 4. Slice 3 — Rail previews
 

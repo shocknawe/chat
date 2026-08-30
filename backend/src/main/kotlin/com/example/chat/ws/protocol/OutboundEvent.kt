@@ -1,5 +1,6 @@
 package com.example.chat.ws.protocol
 
+import com.example.chat.api.dto.ConversationDto
 import com.example.chat.api.dto.MessageDto
 import com.fasterxml.jackson.annotation.JsonSubTypes
 import com.fasterxml.jackson.annotation.JsonTypeInfo
@@ -10,8 +11,10 @@ import java.util.UUID
  * discriminated on a JSON `type` property, mirroring [InboundCommand]
  * (design.md: "Explicit protocol modelled as sealed Kotlin types").
  *
- * All three events reuse the authoritative REST [MessageDto] shape
- * (`{ id, conversationId, senderId, content, createdAt }`). `clientMessageId`
+ * Three of the events reuse the authoritative REST [MessageDto] shape
+ * (`{ id, conversationId, senderId, content, createdAt }`); `CONVERSATION_CREATED`
+ * instead carries the REST [ConversationDto], for the same reason — the
+ * entity the event announces is the same one the listing returns. `clientMessageId`
  * was originally carried alongside it only in [MessageAck] and [ErrorEvent]
  * as a correlation token, never inside the message payload itself
  * (design.md, the DTO shape note). **That omission is reversed**
@@ -29,6 +32,7 @@ import java.util.UUID
 @JsonSubTypes(
     JsonSubTypes.Type(value = MessageAck::class, name = "MESSAGE_ACK"),
     JsonSubTypes.Type(value = NewMessage::class, name = "NEW_MESSAGE"),
+    JsonSubTypes.Type(value = ConversationCreated::class, name = "CONVERSATION_CREATED"),
     JsonSubTypes.Type(value = ErrorEvent::class, name = "ERROR"),
 )
 sealed interface OutboundEvent
@@ -52,6 +56,26 @@ data class MessageAck(
  */
 data class NewMessage(
     val message: MessageDto,
+) : OutboundEvent
+
+/**
+ * Sent to every active connection of the *other* participant only, after
+ * `POST /api/conversations` commits a *new* conversation
+ * (add-conversation-creation-presence-inspector task 3.4; design.md decision
+ * 3). Never to the creator's connections — the creator already holds the REST
+ * response, so a duplicate event would only invite a double-add of the same
+ * conversation — and never for the `200` (already-existed) case, including the
+ * race-lost case where the winning request emitted the event when it created
+ * the row.
+ *
+ * [conversation] reuses the authoritative REST [ConversationDto] shape and
+ * always represents an empty history for exactly the same reason a fresh
+ * conversation's listing does: it has no messages yet, so its (slice-3)
+ * `lastMessage` is absent, in exactly the way the listing represents an empty
+ * history.
+ */
+data class ConversationCreated(
+    val conversation: ConversationDto,
 ) : OutboundEvent
 
 /**

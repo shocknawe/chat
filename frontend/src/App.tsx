@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchConversations, fetchUsers, type User } from './api'
+import { createConversation, fetchConversations, fetchUsers, type Conversation, type User } from './api'
 import {
   clearStoredConversationId,
   clearStoredUserId,
@@ -11,6 +11,7 @@ import {
 } from './identity'
 import { ConnectionStatus } from './components/ConnectionStatus'
 import { ConversationList, conversationLabel } from './components/ConversationList'
+import { CreateConversationDialog } from './components/CreateConversationDialog'
 import { ThreadPane } from './components/ThreadPane'
 import { UserSelectScreen } from './components/UserSelectScreen'
 import { useAnnouncer } from './hooks/useAnnouncer'
@@ -21,7 +22,13 @@ import { useTheme } from './hooks/useTheme'
 import { initials } from './initials'
 import { upsertAuthoritativeMessage } from './messagesCache'
 import { queryClient } from './queryClient'
-import type { ConnectionState, ErrorEvent, MessageAckEvent, NewMessageEvent } from './realtime'
+import type {
+  ConversationCreatedEvent,
+  ConnectionState,
+  ErrorEvent,
+  MessageAckEvent,
+  NewMessageEvent,
+} from './realtime'
 
 /**
  * Root component: establishes the window-scoped current user before any
@@ -99,8 +106,12 @@ interface SignedInShellProps {
   announce: (message: string) => void
 }
 
-/** The one overlay the compact shell can present; a union so a later slice's drawer joins without restructuring the exclusivity mechanism. */
-type OverlayId = 'rail'
+/**
+ * Every overlay the shell can present, exclusively one at a time (task 2.6
+ * established the mechanism; task 3.5 adds the creation dialog as its second
+ * member — opening one always replaces whatever was open rather than stacking).
+ */
+type OverlayId = 'rail' | 'new-conversation'
 
 /**
  * Chat app frame rendered once the current user is established: a
@@ -128,25 +139,84 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
   const { theme, toggleTheme } = useTheme()
   const isCompact = useMediaQuery(COMPACT_QUERY)
 
-  // Task 2.6: exclusive overlay state. Only the rail exists in this slice,
-  // but the shape (a single "currently open overlay id, or none" value) is
-  // exactly what makes exclusivity trivial to extend — opening a second
-  // overlay is just another `setOpenOverlay` call, which always replaces
-  // whatever was open rather than stacking.
+  // Task 2.6: exclusive overlay state; task 3.5 adds the creation dialog as
+  // its second member. Opening an overlay records WHERE focus must return on
+  // dismissal (task 3.6: the control that opened it); closing clears the
+  // overlay and performs that return.
   const [openOverlay, setOpenOverlay] = useState<OverlayId | null>(null)
-  const railToggleRef = useRef<HTMLButtonElement | null>(null)
+  const railToggleRef = useRef<HTMLButtonElement>(null)
+  const newConversationRef = useRef<HTMLButtonElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const closeOverlay = useCallback(() => {
-    setOpenOverlay(null)
-    railToggleRef.current?.focus()
+  /** The control that opened the currently open overlay (its focus-return target). */
+  const returnFocusRef = useRef<HTMLElement | null>(null)
+  /**
+   * Where the deferred effect (below) must put focus once the closing/replaced
+   * DOM has committed. Dismissal (task 3.6) always targets the opening control;
+   * a SUCCESSFUL creation (task 3.7) targets the composer instead — the dialog
+   * closing after success is not a dismissal, and focus belongs on the textarea
+   * of the conversation just opened, not back on the `+`.
+   */
+  const pendingFocusRef = useRef<'return' | 'composer' | null>(null)
+  /**
+   * True while the open creation dialog was opened from the compact rail
+   * overlay's `+` control. Dismissing it must RE-PRESENT that rail overlay —
+   * the `+` control focus returns to lives in the rail heading, which is
+   * inert (off-canvas) while the compact rail is closed — and only then
+   * complete the focus return.
+   */
+  const dialogFromCompactRailRef = useRef(false)
+
+  const openRailOverlay = useCallback(() => {
+    returnFocusRef.current = railToggleRef.current
+    setOpenOverlay('rail')
   }, [])
 
-  // Crossing above the compact threshold while the rail overlay is open must
-  // not leave it stranded mid-transition-state: it is no longer an overlay
-  // at all above the threshold, so the "open" flag is meaningless there.
-  useEffect(() => {
-    if (!isCompact && openOverlay !== null) {
+  const openNewConversation = useCallback(() => {
+    returnFocusRef.current = newConversationRef.current
+    dialogFromCompactRailRef.current = isCompact
+    setOpenOverlay('new-conversation')
+  }, [isCompact])
+
+  const closeOverlay = useCallback(() => {
+    if (openOverlay === 'new-conversation' && dialogFromCompactRailRef.current) {
+      dialogFromCompactRailRef.current = false
+      setOpenOverlay('rail')
+    } else {
       setOpenOverlay(null)
+    }
+    pendingFocusRef.current = 'return'
+  }, [openOverlay])
+
+  // Deferred focus move (task 3.6 dismissal / task 3.7 success). Runs as an
+  // effect so the target's DOM is committed first — on a compact viewport a
+  // dismissed creation dialog re-presents the rail slide-over, and its `+`
+  // control only becomes focusable once that commit (and ConversationList's
+  // `inert` effect) has run; a successful creation's composer may likewise be
+  // mounting in the very commit that removed the dialog.
+  useEffect(() => {
+    const pending = pendingFocusRef.current
+    if (pending === null) return
+    pendingFocusRef.current = null
+    if (pending === 'composer') {
+      composerRef.current?.focus()
+    } else {
+      returnFocusRef.current?.focus()
+    }
+  })
+
+  // Crossing above the compact threshold must not leave the rail overlay
+  // stranded mid-transition-state: it is no longer an overlay at all above
+  // the threshold, so the "open" flag is meaningless there. (The creation
+  // dialog stays open across the threshold: it is modal at every width.) A
+  // dialog opened from the compact rail also loses its "return to the rail
+  // slide-over" disposition, since the rail is no longer an overlay.
+  useEffect(() => {
+    if (!isCompact) {
+      dialogFromCompactRailRef.current = false
+      if (openOverlay === 'rail') {
+        setOpenOverlay(null)
+      }
     }
   }, [isCompact, openOverlay])
 
@@ -242,6 +312,33 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
     [user.id],
   )
 
+  /**
+   * Task 3.9: an incoming CONVERSATION_CREATED (someone else started a
+   * conversation with this user; the backend sends it only to the OTHER
+   * participant's connections, so a matching creation is never this window's
+   * own REST request). The rail is patched in place — the conversation is
+   * appended with an empty history exactly as the event payload represents it
+   * — with zero refetch and, deliberately, ZERO selection change: the reader
+   * stays in whatever conversation they were reading (spec: "without changing
+   * the user's active conversation").
+   *
+   * The keyed guard makes re-delivery idempotent: a duplicate event for a
+   * conversation the rail already lists is a no-op, never a second row.
+   * Empty preview: the `Conversation` DTO carried by the event has no
+   * message-derived fields yet (slice 3 owns previews), so "empty history" is
+   * the absence of `lastMessage` — nothing to derive.
+   */
+  const handleConversationCreated = useCallback(
+    (event: ConversationCreatedEvent) => {
+      const conversation = event.conversation
+      queryClient.setQueryData<Conversation[]>(['conversations', user.id], (existing) => {
+        if (existing === undefined) return existing
+        return existing.some((c) => c.id === conversation.id) ? existing : [...existing, conversation]
+      })
+    },
+    [user.id],
+  )
+
   // Realtime connection (task 6.2): the socket lifecycle is bound to this
   // identity — created once `currentUser` is established (this shell only
   // renders then) and terminated on user switch/unmount. `sendMessage` is
@@ -252,6 +349,7 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
     onMessageAck: handleMessageAck,
     onNewMessage: handleNewMessage,
     onRealtimeError: handleRealtimeError,
+    onConversationCreated: handleConversationCreated,
   })
 
   /**
@@ -279,12 +377,74 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
     queryKey: ['conversations', user.id],
     queryFn: () => fetchConversations(user.id),
   })
+  // Task 3.5: the dialog's directory input. Same key as App's identity-gate
+  // query, so this shares that cache entry — one fetch, two consumers.
+  const directoryQuery = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(() =>
     readStoredConversationId(user.id),
   )
 
   const selectedConversation =
     conversationsQuery.data?.find((c) => c.id === selectedConversationId) ?? null
+
+  /**
+   * Task 3.5: the creation dialog's candidate list — every directory user the
+   * current user has NO conversation with, excluding themselves. The
+   * conversation listing carries full participants, so the partner set is
+   * derived locally; no extra endpoint. (The `['users']` query is deduped
+   * with App's identity-gate query — one fetch, two consumers.) `undefined`
+   * while either input is still loading; the dialog states that in words.
+   */
+  const conversationCandidates = useMemo(() => {
+    const directory = directoryQuery.data
+    const conversations = conversationsQuery.data
+    if (directory === undefined || conversations === undefined) return undefined
+    const partners = new Set(conversations.flatMap((c) => c.participants.map((p) => p.id)))
+    return directory.filter((candidate) => candidate.id !== user.id && !partners.has(candidate.id))
+  }, [directoryQuery.data, conversationsQuery.data, user.id])
+
+  /**
+   * Task 3.7: the dialog's create action. The REST call is the single
+   * authority — this handler runs ONLY its consequences, and only on a
+   * RESOLVED promise, so a rejected request (400/401/404/network, surfaced in
+   * words inside the dialog) can never mutate the rail: the failure path here
+   * is literally "nothing", which is what the spec asks for ("no conversation
+   * is added to the rail"), and the dialog stays open to retry.
+   *
+   * Success (200 create-existing or 201 create) does four things, all batched:
+   * - Patches the rail cache in place (idempotent keyed add) rather than
+   *   refetching — a 201 must appear immediately, and a 200's conversation is
+   *   usually already listed, where the patch is a verified no-op.
+   * - Selects the conversation (and persists the selection across reloads).
+   * - Closes the dialog, discarding the compact-rail re-present disposition —
+   *   the spec sends the user straight INTO the conversation, not back to the
+   *   rail — and defers focus to the composer (the effect above), which may
+   *   only be mounting with this same commit.
+   * - Announces "…opened" per the spec's assistive-technology requirement.
+   */
+  const handleCreateConversation = useCallback(
+    async (participantId: string): Promise<Conversation> => {
+      const conversation = await createConversation(user.id, participantId)
+      queryClient.setQueryData<Conversation[]>(['conversations', user.id], (existing) =>
+        existing === undefined || existing.some((c) => c.id === conversation.id)
+          ? existing
+          : [...existing, conversation],
+      )
+      storeConversationId(user.id, conversation.id)
+      setSelectedConversationId(conversation.id)
+      dialogFromCompactRailRef.current = false
+      setOpenOverlay(null)
+      pendingFocusRef.current = 'composer'
+      const other = conversation.participants.find((p) => p.id !== user.id)
+      announce(
+        `Conversation with ${
+          other?.displayName ?? conversationLabel(conversation, user.id)
+        } opened.`,
+      )
+      return conversation
+    },
+    [user.id, announce],
+  )
 
   // Restored-selection validation: once the conversations list arrives, a
   // stored id that no longer matches one of this user's conversations is
@@ -380,7 +540,7 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
               aria-label={isRailOpen ? 'Close conversations' : 'Open conversations'}
               aria-expanded={isRailOpen}
               aria-controls="conversation-rail"
-              onClick={() => setOpenOverlay(isRailOpen ? null : 'rail')}
+              onClick={() => (isRailOpen ? closeOverlay() : openRailOverlay())}
             >
               <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -452,11 +612,15 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
           onSelect={handleSelectConversation}
           isCompact={isCompact}
           isOverlayOpen={isRailOpen}
+          onNewConversation={openNewConversation}
+          newConversationButtonRef={newConversationRef}
+          isNewConversationOpen={openOverlay === 'new-conversation'}
         />
         <ThreadPane
           currentUser={user}
           conversation={selectedConversation}
           pendingMessages={pendingMessages}
+          composerFocusRef={composerRef}
           onSendMessage={(content) => {
             if (selectedConversation !== null) {
               handleSendMessage(selectedConversation.id, content)
@@ -464,6 +628,17 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
           }}
         />
       </main>
+      {/* Task 3.5: the creation dialog is the overlay state machine's second
+          modal. It renders only while it IS the open overlay (single-overlay
+          exclusivity); Escape, its own scrim, and Cancel all route through the
+          same focus-returning closeOverlay as the rail's dismissal paths. */}
+      {openOverlay === 'new-conversation' && (
+        <CreateConversationDialog
+          candidates={conversationCandidates}
+          onCreate={(participantId) => handleCreateConversation(participantId)}
+          onDismiss={closeOverlay}
+        />
+      )}
       {/* Task 2.6: the scrim is one of the overlay's dismissal mechanisms and
           doubles as the visual cue that the rail is modal while open. */}
       {isRailOpen && (
