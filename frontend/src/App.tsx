@@ -13,6 +13,7 @@ import { ConversationList } from './components/ConversationList'
 import { ThreadPane } from './components/ThreadPane'
 import { UserSelectScreen } from './components/UserSelectScreen'
 import { useChatSocket } from './hooks/useChatSocket'
+import { usePendingMessages } from './hooks/usePendingMessages'
 import { initials } from './initials'
 
 /**
@@ -97,12 +98,40 @@ interface SignedInShellProps {
  * stale across reloads.
  */
 function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
+  // Pending outbound items (task 6.3): optimistic messages with no server id
+  // yet, held OUTSIDE the TanStack cache. State is lifted here — the common
+  // ancestor of ThreadPane (renders it) and the socket handlers (6.4 mutates
+  // it via `removePending`/`markPendingFailed`) — and is keyed to this
+  // identity by the shell's `key`, so a user switch resets it automatically.
+  const { pendingMessages, addPending } = usePendingMessages()
+
   // Realtime connection (task 6.2): the socket lifecycle is bound to this
   // identity — created once `currentUser` is established (this shell only
-  // renders then) and terminated on user switch/unmount. The returned
-  // `sendMessage` is consumed by the composer in task 6.3, event handlers by
-  // 6.4/6.5, and `connectionState` by the availability indicator in 6.6.
-  useChatSocket(user.id)
+  // renders then) and terminated on user switch/unmount. `sendMessage` is
+  // consumed by the submit path below, event handlers by 6.4/6.5, and
+  // `connectionState` by the availability indicator in 6.6.
+  const { sendMessage } = useChatSocket(user.id)
+
+  /**
+   * Task 6.3 submit path. `content` arrives already boundary-trimmed and
+   * guaranteed non-blank by the composer (it mirrors what the backend will
+   * validate, which rejects empty/whitespace). The optimistic pending item is
+   * appended FIRST so the bubble appears even when the socket is unavailable —
+   * the socket queues the command internally (6.1) and will flush it on
+   * reconnect under the same `clientMessageId`.
+   */
+  const handleSendMessage = (conversationId: string, content: string): void => {
+    const clientMessageId = crypto.randomUUID()
+    addPending({
+      clientMessageId,
+      conversationId,
+      senderId: user.id,
+      content,
+      createdAt: new Date().toISOString(),
+      status: 'pending',
+    })
+    sendMessage({ clientMessageId, conversationId, content })
+  }
 
   const conversationsQuery = useQuery({
     queryKey: ['conversations', user.id],
@@ -165,7 +194,16 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
           selectedId={selectedConversationId}
           onSelect={handleSelectConversation}
         />
-        <ThreadPane currentUser={user} conversation={selectedConversation} />
+        <ThreadPane
+          currentUser={user}
+          conversation={selectedConversation}
+          pendingMessages={pendingMessages}
+          onSendMessage={(content) => {
+            if (selectedConversation !== null) {
+              handleSendMessage(selectedConversation.id, content)
+            }
+          }}
+        />
       </main>
     </div>
   )

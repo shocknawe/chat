@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { Fragment, useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchMessages, type Conversation, type Message, type User } from '../api'
 import { conversationLabel } from './ConversationList'
+import { Composer } from './Composer'
+import type { PendingMessage } from '../hooks/usePendingMessages'
 import { initials } from '../initials'
 
 /**
@@ -51,14 +53,28 @@ const timestampFormat = new Intl.DateTimeFormat(undefined, {
 interface ThreadPaneProps {
   currentUser: User
   conversation: Conversation | null
+  /**
+   * All of the current user's optimistic outbound items (task 6.3); this pane
+   * renders the slice belonging to `conversation`. Lives outside the TanStack
+   * cache until 6.4 reconciles each item by `clientMessageId`.
+   */
+  pendingMessages: PendingMessage[]
+  /** Submits a boundary-trimmed, non-empty draft for `conversation`. */
+  onSendMessage: (content: string) => void
 }
 
-export function ThreadPane({ currentUser, conversation }: ThreadPaneProps) {
+export function ThreadPane({ currentUser, conversation, pendingMessages, onSendMessage }: ThreadPaneProps) {
   const messagesQuery = useQuery({
     queryKey: ['messages', currentUser.id, conversation?.id ?? ''],
     queryFn: () => fetchMessages(currentUser.id, conversation?.id ?? ''),
     enabled: conversation !== null,
   })
+
+  // Per-conversation slice of the shared pending store, in submission order.
+  const threadPending = useMemo(
+    () => pendingMessages.filter((m) => m.conversationId === conversation?.id),
+    [pendingMessages, conversation?.id],
+  )
 
   const messages = useMemo(() => {
     if (messagesQuery.data === undefined) return undefined
@@ -73,14 +89,15 @@ export function ThreadPane({ currentUser, conversation }: ThreadPaneProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const messageCount = messages?.length
 
-  // Bottom anchor: on conversation change and on initial data arrival. The
-  // effect runs after the DOM commit, so scrollHeight includes the new list.
+  // Bottom anchor: on conversation change, on data arrival, and whenever a
+  // pending item is appended (a just-sent message should snap into view too).
+  // The effect runs after the DOM commit, so scrollHeight includes the new list.
   useEffect(() => {
     const region = scrollRef.current
-    if (region !== null && messageCount !== undefined) {
+    if (region !== null && (messageCount !== undefined || threadPending.length > 0)) {
       region.scrollTop = region.scrollHeight
     }
-  }, [conversation?.id, messageCount])
+  }, [conversation?.id, messageCount, threadPending.length])
 
   const resolveSender = (senderId: string): string =>
     conversation?.participants.find((p) => p.id === senderId)?.displayName ?? 'Someone'
@@ -135,7 +152,7 @@ export function ThreadPane({ currentUser, conversation }: ThreadPaneProps) {
           </div>
         )}
 
-        {groups !== undefined && groups.length === 0 && (
+        {groups !== undefined && groups.length === 0 && threadPending.length === 0 && (
           <div className="thread-region thread-region--center">
             <div className="thread-empty">
               <p className="meta">No messages yet — send the first message.</p>
@@ -143,7 +160,10 @@ export function ThreadPane({ currentUser, conversation }: ThreadPaneProps) {
           </div>
         )}
 
-        {groups !== undefined && groups.length > 0 && (
+        {/* History groups, then the pending slice in-flow after them. The list
+            renders whenever either source has items so a first-ever message
+            skips the empty state and appears immediately as pending. */}
+        {groups !== undefined && (groups.length > 0 || threadPending.length > 0) && (
           <div className="thread-region">
             <ol className="message-list">
               {groups.map((group) => {
@@ -188,10 +208,37 @@ export function ThreadPane({ currentUser, conversation }: ThreadPaneProps) {
                   </li>
                 )
               })}
+              {threadPending.length > 0 && (
+                <li className="message-group message-group--own" aria-label="Pending messages">
+                  {/* Pending items are always the current user's own: they sit
+                      under history, subdued, each with an explicit status word
+                      so the optimistic state is announced, not just tinted. */}
+                  {threadPending.map((pending) => (
+                    <Fragment key={pending.clientMessageId}>
+                      <p className="message-bubble message-bubble--own message-bubble--pending">
+                        {pending.content}
+                      </p>
+                      <span
+                        className={
+                          pending.status === 'failed'
+                            ? 'meta message-meta message-meta--failed'
+                            : 'meta message-meta'
+                        }
+                      >
+                        {pending.status === 'failed' ? 'Failed to send' : 'Sending…'}
+                      </span>
+                    </Fragment>
+                  ))}
+                </li>
+              )}
             </ol>
           </div>
         )}
       </div>
+      <Composer
+        ariaLabel={`Message to ${conversationLabel(conversation, currentUser.id)}`}
+        onSubmit={onSendMessage}
+      />
     </section>
   )
 }
