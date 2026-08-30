@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-30T00:00:00Z",
+  "title": "Design System: Realtime Messaging MVP",
+  "extensions": {
+    "colorMeta": {
+      "brand-purple": { "role": "primary", "displayName": "Zühlke Purple", "canonical": "#985b9c", "tonalRamp": ["#1c1120", "#2f1d35", "#45294c", "#5c3764", "#75467c", "#985b9c", "#bb8cbe", "#e3cfe5"] },
+      "brand-ink": { "role": "primary", "displayName": "Brand Ink", "canonical": "#834f88", "tonalRamp": ["#190f1b", "#2b1a2e", "#3e2542", "#523057", "#693e6f", "#834f88", "#a97cad", "#dcc6de"] },
+      "bubble-own": { "role": "primary", "displayName": "Own-Message Purple", "canonical": "#834f88", "tonalRamp": ["#190f1b", "#2b1a2e", "#3e2542", "#523057", "#693e6f", "#834f88", "#a97cad", "#dcc6de"] },
+      "grad-purple": { "role": "primary", "displayName": "Gradient Stop — Purple", "canonical": "#aa41af", "tonalRamp": ["#210c22", "#380f3a", "#4f1352", "#67176b", "#8a2090", "#aa41af", "#c579c9", "#e8c9ea"] },
+      "grad-violet": { "role": "primary", "displayName": "Gradient Stop — Violet Bridge", "canonical": "#8a53c0" },
+      "grad-blue": { "role": "primary", "displayName": "Gradient Stop — Blue", "canonical": "#3c69c8", "tonalRamp": ["#0b1226", "#131f42", "#1b2c5f", "#24397d", "#2d4da3", "#3c69c8", "#7c9ade", "#c9d7f3"] },
+      "grad-cyan": { "role": "primary", "displayName": "Gradient Stop — Cyan", "canonical": "#00a5e6", "tonalRamp": ["#001d29", "#003147", "#004566", "#005b86", "#0079b2", "#00a5e6", "#5cc7f4", "#bfe8fb"] },
+      "ok": { "role": "secondary", "displayName": "Delivered Green", "canonical": "#088043", "tonalRamp": ["#02160b", "#032614", "#04371d", "#054827", "#066234", "#088043", "#3fbd75", "#a9e6c3"] },
+      "info": { "role": "secondary", "displayName": "Connected Blue", "canonical": "#007299", "tonalRamp": ["#001520", "#002335", "#00324a", "#004262", "#005a83", "#007299", "#33b5e0", "#b3e5f7"] },
+      "warn": { "role": "secondary", "displayName": "Degraded Amber", "canonical": "#f2a33c", "tonalRamp": ["#2b1a03", "#452a05", "#5f3a07", "#7a4b09", "#a9670c", "#f2a33c", "#f7c584", "#fce7cc"] },
+      "warn-ink": { "role": "secondary", "displayName": "Degraded Amber (text, light)", "canonical": "#8a5200" },
+      "danger": { "role": "secondary", "displayName": "Failed Red", "canonical": "#b00020", "tonalRamp": ["#1e0006", "#33000b", "#490010", "#5f0015", "#84001b", "#b00020", "#e8607a", "#f8c3cd"] },
+      "danger-dark": { "role": "secondary", "displayName": "Failed Red (text, dark)", "canonical": "#ff6b7a" },
+      "bg": { "role": "neutral", "displayName": "Periwinkle Field", "canonical": "#ebe7f5", "tonalRamp": ["#1a1826", "#2a273c", "#3a3653", "#4d4869", "#6b6688", "#9a95b4", "#c4c0da", "#ebe7f5"] },
+      "bg-dark": { "role": "neutral", "displayName": "Deep Purple-Black Field", "canonical": "#0b0813" },
+      "ink": { "role": "neutral", "displayName": "Primary Ink", "canonical": "#181320", "tonalRamp": ["#181320", "#2a2338", "#3d3450", "#514769", "#6b6088", "#9890ae", "#c5bfd2", "#f3f0ff"] },
+      "ink-2": { "role": "neutral", "displayName": "Secondary Ink", "canonical": "#524b62" },
+      "ink-3": { "role": "neutral", "displayName": "Muted Ink", "canonical": "#736c88" },
+      "surface": { "role": "neutral", "displayName": "Primary Glass", "canonical": "rgba(255,255,255,.66)" },
+      "surface-2": { "role": "neutral", "displayName": "Recessed Glass", "canonical": "rgba(255,255,255,.42)" },
+      "surface-solid": { "role": "neutral", "displayName": "Opaque Surface", "canonical": "#ffffff" },
+      "field": { "role": "neutral", "displayName": "Recessed Field", "canonical": "rgba(255,255,255,.66)" },
+      "stroke": { "role": "neutral", "displayName": "Glass Hairline", "canonical": "rgba(152,91,156,.20)" },
+      "stroke-strong": { "role": "neutral", "displayName": "Hover Hairline", "canonical": "rgba(152,91,156,.40)" },
+      "chip": { "role": "neutral", "displayName": "Purple Tint", "canonical": "rgba(152,91,156,.13)" },
+      "nav-active": { "role": "neutral", "displayName": "Active Row Wash", "canonical": "rgba(255,255,255,.90)" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Empty-state headline and the identity-selection greeting. One per view at most." },
+      "headline": { "displayName": "Headline", "purpose": "The conversation partner's name in the thread header — the one place a person's name is given weight." },
+      "title": { "displayName": "Title", "purpose": "Brand wordmark, conversation-row names, section headings." },
+      "body": { "displayName": "Body", "purpose": "Message content, composer text, conversation previews. 15px because it is the thing being read, not chrome." },
+      "label": { "displayName": "Label", "purpose": "Date separators, status pills, kbd. Uppercase, 0.14em tracking." },
+      "code": { "displayName": "Mono", "purpose": "Connection diagnostics and machine identifiers only. Ships only if the build actually needs it." }
+    },
+    "shadows": [
+      { "name": "pane-lift", "value": "0 18px 50px -24px rgba(90,45,120,.40), 0 2px 8px -4px rgba(90,45,120,.20)", "purpose": "The default glass pane: conversation rail, thread header, composer, identity card. Long, soft, purple-tinted — floating, not stamped." },
+      { "name": "pane-lift-dark", "value": "0 24px 60px -28px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.04)", "purpose": "Dark-theme pane lift." },
+      { "name": "bubble-rest", "value": "0 1px 2px -1px rgba(90,45,120,.18)", "purpose": "A whisper under a message bubble. Bubbles never take pane-lift — repetition destroys the hierarchy shadow is meant to create." },
+      { "name": "accent-glow", "value": "0 14px 34px -12px rgba(170,65,175,.45)", "purpose": "Under the gradient-filled primary button only. Grows to 0 20px 44px -14px on hover." },
+      { "name": "focus-ring", "value": "0 0 0 4px rgba(152,91,156,.13)", "purpose": "The soft purple focus ring. Never remove an outline without this replacing it." }
+    ],
+    "motion": [
+      { "name": "ease", "value": "cubic-bezier(.22, 1, .36, 1)", "purpose": "Ease-out-quint. The only easing in the system; no bounce, no spring." },
+      { "name": "micro", "value": "200ms", "purpose": "Message arrival fade+rise, pending→sent crossfade, micro-feedback." },
+      { "name": "transform", "value": "300ms", "purpose": "Hover lifts, connection banner slide-down." },
+      { "name": "shake", "value": "elastic.out(1, .4), ~8px, once", "purpose": "The single sanctioned non-monotonic gesture: a failed send. Never repeated, never on retry, skipped under prefers-reduced-motion." }
+    ],
+    "breakpoints": [
+      { "name": "xl", "value": "1180px" },
+      { "name": "lg", "value": "920px" },
+      { "name": "md", "value": "720px" },
+      { "name": "sm", "value": "560px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Gradient-filled pill for the single primary action in a view; hover cross-fades to a reversed gradient.",
+      "html": "<button class=\"ds-btn-primary\"><span>Start messaging</span></button>",
+      "css": ".ds-btn-primary { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 9px; height: 50px; padding: 0 26px; border: none; border-radius: 999px; font-family: 'AA Zuehlke', Lato, system-ui, sans-serif; font-size: 15px; font-weight: 700; color: #fff; cursor: pointer; background: linear-gradient(45deg, #aa41af 5%, #3c69c8 60%, #00a5e6 100%); box-shadow: 0 14px 34px -12px rgba(170,65,175,.45); transition: transform .3s cubic-bezier(.22,1,.36,1), box-shadow .3s cubic-bezier(.22,1,.36,1); } .ds-btn-primary::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(45deg, #00a5e6 0%, #3c69c8 40%, #aa41af 95%); opacity: 0; transition: opacity .3s cubic-bezier(.22,1,.36,1); } .ds-btn-primary > span { position: relative; z-index: 1; } .ds-btn-primary:hover { transform: translateY(-2px); box-shadow: 0 20px 44px -14px rgba(170,65,175,.5); } .ds-btn-primary:hover::before { opacity: 1; } .ds-btn-primary:focus-visible { outline: 2px solid #985b9c; outline-offset: 2px; }"
+    },
+    {
+      "name": "Send Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Icon-only 44px pill inside the composer. Disabled whenever the composer is empty or whitespace-only — the visual expression of the empty-message guard, never its only enforcement.",
+      "html": "<button class=\"ds-btn-send\" aria-label=\"Send message\"><svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M22 2 11 13\"/><path d=\"M22 2 15 22l-4-9-9-4Z\"/></svg></button>",
+      "css": ".ds-btn-send { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: none; border-radius: 999px; color: #fff; cursor: pointer; background: linear-gradient(45deg, #aa41af 5%, #3c69c8 60%, #00a5e6 100%); box-shadow: 0 14px 34px -12px rgba(170,65,175,.45); transition: transform .3s cubic-bezier(.22,1,.36,1), opacity .2s; } .ds-btn-send:hover:not(:disabled) { transform: translateY(-2px); } .ds-btn-send:focus-visible { outline: 2px solid #985b9c; outline-offset: 2px; } .ds-btn-send:disabled { opacity: .38; cursor: not-allowed; box-shadow: none; transform: none; }"
+    },
+    {
+      "name": "Composer",
+      "kind": "input",
+      "refersTo": "composer",
+      "description": "The primary control. Recessed field rather than glass, identical inner padding at one line or five, auto-grows to a 160px cap. Enter sends, Shift+Enter newlines.",
+      "html": "<div class=\"ds-composer\"><textarea class=\"ds-composer-input\" rows=\"1\" placeholder=\"Write a message…\" aria-label=\"Write a message\"></textarea></div>",
+      "css": ".ds-composer { display: flex; align-items: flex-end; gap: 14px; } .ds-composer-input { flex: 1; min-height: 50px; max-height: 160px; padding: 14px 15px; border: 1px solid rgba(152,91,156,.20); border-radius: 12px; background: rgba(255,255,255,.66); color: #181320; font-family: Lato, system-ui, -apple-system, sans-serif; font-size: 15px; line-height: 1.5; resize: none; transition: border-color .2s, background .2s, box-shadow .2s; } .ds-composer-input::placeholder { color: #736c88; } .ds-composer-input:hover { border-color: rgba(152,91,156,.40); } .ds-composer-input:focus { outline: none; border-color: #985b9c; background: #fff; box-shadow: 0 0 0 4px rgba(152,91,156,.13); } .ds-composer-input.ds-invalid { border-color: #b00020; box-shadow: 0 0 0 4px rgba(176,0,32,.12); }"
+    },
+    {
+      "name": "Conversation Row",
+      "kind": "nav",
+      "refersTo": "conversation-row",
+      "description": "The conversation list is the navigation, so it inherits the nav-item contract: hover wash, active wash plus the 4px gradient left-edge marker — the system's only sanctioned edge stripe.",
+      "html": "<nav class=\"ds-conv-list\"><a class=\"ds-conv-row ds-is-active\" href=\"#\" aria-current=\"page\"><span class=\"ds-avatar\">AK</span><span class=\"ds-conv-text\"><span class=\"ds-conv-name\">Amara Kelly</span><span class=\"ds-conv-preview\">Pushed the reconnect fix — take a look</span></span><span class=\"ds-conv-time\">14:02</span></a><a class=\"ds-conv-row\" href=\"#\"><span class=\"ds-avatar\">TN</span><span class=\"ds-conv-text\"><span class=\"ds-conv-name\">Tomás Nyberg</span><span class=\"ds-conv-preview\">Sounds good, talk tomorrow</span></span><span class=\"ds-conv-time\">Tue</span></a></nav>",
+      "css": ".ds-conv-list { display: flex; flex-direction: column; gap: 2px; width: 300px; font-family: Lato, system-ui, sans-serif; } .ds-conv-row { position: relative; display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; text-decoration: none; color: #524b62; transition: background .2s, color .2s; } .ds-conv-row:hover { color: #181320; background: rgba(255,255,255,.42); } .ds-conv-row.ds-is-active { color: #181320; background: rgba(255,255,255,.90); box-shadow: 0 18px 50px -24px rgba(90,45,120,.40), 0 2px 8px -4px rgba(90,45,120,.20); } .ds-conv-row.ds-is-active::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 4px; border-radius: 999px; background: linear-gradient(45deg, #aa41af 5%, #3c69c8 60%, #00a5e6 100%); } .ds-conv-row:focus-visible { outline: 2px solid #985b9c; outline-offset: 2px; } .ds-avatar { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 999px; background: linear-gradient(45deg, #aa41af 5%, #3c69c8 60%, #00a5e6 100%); color: #fff; font-size: 12px; font-weight: 700; letter-spacing: .02em; } .ds-conv-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; } .ds-conv-name { font-family: 'AA Zuehlke', Lato, system-ui, sans-serif; font-size: 16px; font-weight: 700; letter-spacing: -.01em; } .ds-conv-preview { font-size: 13px; color: #524b62; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-conv-time { font-size: 12px; color: #736c88; font-variant-numeric: tabular-nums; align-self: start; }"
+    },
+    {
+      "name": "Message Bubble — Own",
+      "kind": "custom",
+      "refersTo": "message-own",
+      "description": "The only saturated fill in the thread. Three states — sending, sent, failed — each announced in words below-right, never by color or icon alone. The 6px bottom-right corner is the system's one asymmetric shape, taken only by the last bubble in a group.",
+      "html": "<div class=\"ds-thread ds-thread-own\"><div class=\"ds-bubble ds-bubble-own\">Deploying the compose stack now</div><div class=\"ds-bubble ds-bubble-own ds-bubble-last\">Should be up in a minute</div><div class=\"ds-meta\">14:03</div><div class=\"ds-bubble ds-bubble-own ds-bubble-last ds-is-pending\">Reconnect handler is in</div><div class=\"ds-meta\">Sending…</div><div class=\"ds-bubble ds-bubble-own ds-bubble-last ds-is-failed\">This one never reached the server</div><div class=\"ds-meta ds-meta-failed\">Not sent · <button class=\"ds-retry\" type=\"button\">Retry</button></div></div>",
+      "css": ".ds-thread { display: flex; flex-direction: column; font-family: Lato, system-ui, sans-serif; } .ds-thread-own { align-items: flex-end; } .ds-bubble { max-width: min(72ch, 68%); padding: 10px 14px; border-radius: 18px; font-size: 15px; line-height: 1.5; margin-bottom: 4px; } .ds-bubble-last { margin-bottom: 2px; } .ds-bubble-own { background: #834f88; color: #fff; border: 1px solid transparent; box-shadow: 0 1px 2px -1px rgba(90,45,120,.18); } .ds-thread-own .ds-bubble-last { border-bottom-right-radius: 6px; } .ds-bubble-own.ds-is-pending { background: rgba(131,79,136,.55); color: rgba(255,255,255,.85); } .ds-bubble-own.ds-is-failed { background: rgba(176,0,32,.10); color: #b00020; border-color: rgba(176,0,32,.45); } .ds-meta { margin: 0 2px 18px; font-size: 12px; color: #736c88; font-variant-numeric: tabular-nums; } .ds-meta-failed { color: #b00020; } .ds-retry { padding: 0; border: none; background: none; color: #b00020; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; } .ds-retry:focus-visible { outline: 2px solid #985b9c; outline-offset: 2px; border-radius: 4px; }"
+    },
+    {
+      "name": "Message Bubble — Other",
+      "kind": "custom",
+      "refersTo": "message-other",
+      "description": "Neutral glass. Grouped at 4px, with the asymmetric 6px corner on the bottom-left of the group's last bubble and the avatar aligned to it.",
+      "html": "<div class=\"ds-thread ds-thread-other\"><div class=\"ds-bubble ds-bubble-other\">Nice — is the registry keyed per connection or per user?</div><div class=\"ds-row-end\"><span class=\"ds-avatar ds-avatar-sm\">AK</span><div class=\"ds-bubble ds-bubble-other ds-bubble-last\">Asking because of the two-window case</div></div><div class=\"ds-meta ds-meta-other\">14:04</div></div>",
+      "css": ".ds-thread-other { align-items: flex-start; } .ds-bubble-other { background: rgba(255,255,255,.66); color: #181320; border: 1px solid rgba(152,91,156,.20); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); box-shadow: 0 1px 2px -1px rgba(90,45,120,.18); margin-left: 42px; } .ds-row-end { display: flex; align-items: flex-end; gap: 8px; } .ds-row-end .ds-bubble-other { margin-left: 0; border-bottom-left-radius: 6px; } .ds-avatar-sm { width: 34px; height: 34px; flex: 0 0 34px; font-size: 12px; } .ds-meta-other { margin-left: 44px; }"
+    },
+    {
+      "name": "Connection Banner",
+      "kind": "custom",
+      "refersTo": "connection-banner",
+      "description": "Sits under the thread header while realtime is unavailable. States what is happening and what is being done about it, carries role=status so it is announced, and never turns into a red full-bleed error bar — the app still works.",
+      "html": "<div class=\"ds-conn\" role=\"status\" aria-live=\"polite\"><span class=\"ds-conn-dot\"></span>Realtime messaging unavailable · reconnecting…</div>",
+      "css": ".ds-conn { display: inline-flex; align-items: center; gap: 9px; padding: 8px 16px; border-radius: 999px; background: rgba(242,163,60,.15); border: 1px solid rgba(242,163,60,.35); color: #181320; font-family: Lato, system-ui, sans-serif; font-size: 15px; } .ds-conn-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 999px; background: #f2a33c; } .ds-conn.ds-is-ok { background: rgba(8,128,67,.13); border-color: rgba(8,128,67,.32); } .ds-conn.ds-is-ok .ds-conn-dot { background: #088043; } @media (prefers-reduced-motion: no-preference) { .ds-conn { animation: ds-conn-in .3s cubic-bezier(.22,1,.36,1); } @keyframes ds-conn-in { from { opacity: 0; transform: translateY(-8px); } } }"
+    },
+    {
+      "name": "Glass Pane",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The one glass recipe: translucent surface, 22px backdrop blur, purple-tinted pane lift, hairline border, top-edge sheen. Used for the conversation rail, thread header, composer bar, and identity card. Never nested.",
+      "html": "<div class=\"ds-pane\"><div class=\"ds-pane-title\">Choose your identity</div><div class=\"ds-pane-body\">Pick a seeded user to start messaging. Open a second window as someone else to see realtime delivery.</div></div>",
+      "css": ".ds-pane { position: relative; max-width: 380px; padding: 26px; border-radius: 26px; border: 1px solid rgba(152,91,156,.20); background: rgba(255,255,255,.66); -webkit-backdrop-filter: blur(22px); backdrop-filter: blur(22px); box-shadow: 0 18px 50px -24px rgba(90,45,120,.40), 0 2px 8px -4px rgba(90,45,120,.20); color: #181320; font-family: Lato, system-ui, sans-serif; } .ds-pane::before { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(160deg, rgba(255,255,255,.14), transparent 40%); } .ds-pane-title { font-family: 'AA Zuehlke', Lato, system-ui, sans-serif; font-size: 16px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 18px; } .ds-pane-body { font-size: 15px; line-height: 1.5; color: #524b62; }"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "status-pill",
+      "description": "Small uppercase label for date separators and connection state in the header. Meaning always rides in the text, never in the tint alone.",
+      "html": "<span class=\"ds-pill\">Today</span> <span class=\"ds-pill ds-pill-ok\">Connected</span> <span class=\"ds-pill ds-pill-warn\">Reconnecting</span>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: rgba(152,91,156,.13); color: #524b62; font-family: Lato, system-ui, sans-serif; font-size: 11px; font-weight: 700; line-height: 1.2; letter-spacing: .14em; text-transform: uppercase; } .ds-pill-ok { background: rgba(8,128,67,.14); color: #088043; } .ds-pill-warn { background: rgba(242,163,60,.16); color: #8a5200; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Lit Room",
+    "overview": "Two people are in one softly-lit room. The walls are glass and the light behind them is alive — the Zühlke purple→cyan field breathing away in the background. The furniture is quiet: a rail of conversations, a thin header, a composer at the bottom. You stop noticing all of it within seconds, which is the point. The only object in the room that carries the brand at full voice is the message you just sent. Everything else steps back so two people can talk.\n\nThis is an Operate surface. The visitor is doing a task — reading what someone said and answering — and scanability, consistency, and honest system feedback outrank expression. The brand does not live in a hero here; it lives in precise details: the exact purple of your own words, the 4px gradient edge on the conversation you have open, the way a pending message resolves. Warmth is human, not decorative.\n\nIt inherits the Zühlke world from the \"Claude Code · Insights\" system wholesale — the identity gradient, the single purple accent, the glass-over-ambient-field material, the integer type scale, the dual-theme commitment — and deliberately drops that system's other three surface families. There is no dashboard, no setup wizard, no marketing site, no documentation shell here. One surface family means the drift that system documented against itself simply has no way to occur: there is one recipe for each thing, because there is only one place each thing appears.",
+    "keyCharacteristics": [
+      "Glass panes over an ambient gradient field; depth from blur, shadow, and a top-edge sheen — never flat fills.",
+      "One chromatic accent (Zühlke purple), spent almost entirely on the user's own messages.",
+      "The gradient is identity and never sits behind body copy — which in a messaging app means it never touches a bubble.",
+      "Integer type scale (11 · 12 · 13 · 14 · 15 · 16 · 20), two humanist families, a narrow mono layer.",
+      "Light and dark are equally first-class; every token carries both values.",
+      "Message state — pending, sent, failed, disconnected — is always words first, color second."
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Zühlke purple is the only chromatic accent in the chrome. Everything non-identity, non-status is a purple-tinted neutral. A second decorative hue anywhere in the product is wrong.", "section": "colors" },
+      { "name": "The Own-Words Rule", "body": "In the thread, the only saturated fill is the message you sent. The other person's messages are neutral glass; the rail, header, and composer are neutral glass. This is the chat form of the One Accent Rule, and it is what makes a fifty-message thread readable: one color means one thing, and that thing is authorship.", "section": "colors" },
+      { "name": "The Gradient-Is-Identity Rule", "body": "The gradient appears on the brand mark, avatars, the active-conversation edge marker, the primary button, and the ambient shader. Nowhere else — and specifically never inside or behind a message bubble, where it would put a moving multi-stop fill under body copy.", "section": "colors" },
+      { "name": "The Legibility-Wins Rule", "body": "Body text clears ≥4.5:1 against the actual rendered surface (pane plus whatever shows through) in both themes; large or bold text ≥3:1. When atmosphere and contrast conflict, contrast wins — step ink toward the dark end of the ramp, never lighten \"for elegance.\" Placeholder text in the composer is held to 4.5:1 too.", "section": "colors" },
+      { "name": "The Status-Is-Text Rule", "body": "Connection state, send state, and errors are announced in words. Color is the second signal and never the only one. \"Reconnecting…\" is the message; the amber is decoration on top of it.", "section": "colors" },
+      { "name": "The Integer-Ramp Rule", "body": "UI font sizes land on the fixed integer ramp 11 · 12 · 13 · 14 · 15 · 16 · 20; only the display headline uses fluid clamp(). No half-pixels.", "section": "typography" },
+      { "name": "The Display-Is-For-People Rule", "body": "The AA Zuehlke display face carries names and the empty-state headline — nothing else. Never in labels, buttons, message body, timestamps, or dense UI text. In the inherited system this rule protected numeric figures; here it protects people's names, and the prohibition is identical.", "section": "typography" },
+      { "name": "The Message-Reads-First Rule", "body": "Nothing in a bubble competes with the message. Timestamp and send state sit outside or below the bubble at 12px --ink-3, never inline at body weight, and never as an icon whose meaning is not also written.", "section": "typography" },
+      { "name": "The Glass-Recipe Rule", "body": "One recipe, no exceptions: background: var(--surface) + backdrop-filter: blur(22px) + var(--card-shadow) + border: 1px solid var(--stroke) + top-edge sheen ::before. The inherited system carried this as an aspiration because four surface families had each redefined it; with one family there is nothing to reconcile. Do not reintroduce a per-component override.", "section": "elevation" },
+      { "name": "The Thread-Is-Flat Rule", "body": "Panes float; bubbles do not. A message bubble carries a hairline and at most the Bubble-rest whisper. The moment bubbles get the pane shadow, repetition destroys the hierarchy that shadow was supposed to create.", "section": "elevation" },
+      { "name": "The One Asymmetric Corner Rule", "body": "The message bubble is the only shape permitted an asymmetric radius: 18px on three corners and 6px on the corner nearest its author's edge — bottom-right for your own messages, bottom-left for theirs. Only the last bubble in a consecutive group takes it, which is what makes a group read as one utterance. No drawn tails, no triangles, no pseudo-element beaks.", "section": "shapes" },
+      { "name": "The One Edge Marker Rule", "body": "A colored left or right edge stripe is banned as decoration. The single sanctioned use is the 4px --brand-grad marker on the active conversation row — an active-state indicator, inherited unchanged from the system's active-nav rule.", "section": "shapes" }
+    ],
+    "dos": [
+      "Do float glass over the ambient field with the one recipe: --surface + backdrop-filter: blur(22px) + --card-shadow + --stroke border + top-edge sheen.",
+      "Do keep Zühlke purple (#985b9c) as the only chromatic accent, and spend its saturated form on the user's own messages and nothing else.",
+      "Do reserve the gradient for the five identity surfaces — brand mark, avatar, active-conversation marker, primary button, ambient shader.",
+      "Do verify ≥4.5:1 body / ≥3:1 large text against the rendered surface in both themes, including composer placeholder text.",
+      "Do use the theme-tuned text forms warn-ink (#8a5200 light) and danger-dark (#ff6b7a dark) whenever a status color carries words.",
+      "Do write every state in words — \"Sending…\", \"Not sent\", \"Reconnecting…\" — and let color be the second signal.",
+      "Do group consecutive messages at 4px and separate senders at 18px; let spacing do the grouping instead of a container.",
+      "Do give the failed state a real, focusable Retry button inside the thread.",
+      "Do ship every interactive state with a visible focus ring (0 0 0 4px var(--chip)), and give every animation a prefers-reduced-motion end-state.",
+      "Do announce connection loss with role=\"status\" / aria-live=\"polite\"."
+    ],
+    "donts": [
+      "Don't put the gradient — or any fill that is not --bubble-own or --surface — behind message text.",
+      "Don't give message bubbles the pane shadow. Repetition is what kills elevation; bubbles get a hairline and a whisper.",
+      "Don't draw a bubble tail, beak, or triangle. The asymmetric 6px corner on the group's last bubble is the entire device.",
+      "Don't let a bubble resize, reposition, or re-order when it goes from pending to sent. Confirmation must be visually silent below the meta line.",
+      "Don't auto-scroll a reader who has scrolled up. Offer a \"new message\" affordance and let them decide.",
+      "Don't use background-clip: text gradient text anywhere. The inherited system licensed it for marketing hero type; this product has no marketing surface, so the ban is unconditional again.",
+      "Don't use a colored left/right edge stripe as decoration. The 4px gradient active-conversation marker is the only sanctioned one.",
+      "Don't signal unread with a colored row fill — it collides with the active state and breaks the One Accent Rule. Weight plus a --brand dot.",
+      "Don't disable the composer when the socket drops. Change the send affordance and raise the banner; never take away text someone is mid-way through writing.",
+      "Don't convey send state through an icon alone — no bare checkmarks, double-ticks, or clock glyphs without a word beside them.",
+      "Don't build a generic SaaS dashboard (hero-metric templates, identical icon-heading-text grids, flat gray chrome) or drift into the corporate/consultancy stiff register.",
+      "Don't reintroduce the inherited system's drift: one glass recipe, one button family, one z-scale, one meaning per name. With a single surface family there is no excuse for a second of anything."
+    ]
+  }
+}

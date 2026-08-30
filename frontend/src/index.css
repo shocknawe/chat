@@ -1,0 +1,919 @@
+/**
+ * Token layer for the Realtime Messaging MVP — "The Lit Room" (DESIGN.md).
+ * Zühlke purple→cyan glass world: one chromatic accent, one glass recipe,
+ * light and dark as first-class equals. Values mirror DESIGN.md verbatim.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Brand */
+  --brand: #985b9c;
+  --brand-ink: #834f88;
+  --brand-grad: linear-gradient(45deg, #aa41af 5%, #3c69c8 60%, #00a5e6 100%);
+  --glow-1: #aa41af66;
+
+  /* Semantic status (text forms are theme-tuned, per DESIGN.md; the raw warn
+     hue and its step-downs are theme-invariant — fills, borders, dots only) */
+  --ok: #088043;
+  --warn-ink: #8a5200;
+  --warn: #f2a33c;
+  --warn-tint: #f2a33c26;
+  --warn-stroke: #f2a33c59;
+  --danger: #b00020;
+
+  /* Fields + ink ramp */
+  --bg: #ebe7f5;
+  --bg-2: #f3f0fb;
+  --ink: #181320;
+  --ink-2: #524b62;
+  --ink-3: #736c88;
+
+  /* Glass + stroke */
+  --surface: #ffffffa8;
+  --surface-2: #ffffff6b;
+  --surface-solid: #ffffff;
+  --stroke: #985b9c33;
+  --stroke-strong: #985b9c66;
+  --chip: #985b9c21;
+  --nav-active: #ffffffe6;
+  --bubble-own: #834f88;
+
+  /* Depth */
+  --glass-blur: 22px;
+  --card-shadow:
+    0 18px 50px -24px rgba(90, 45, 120, 0.4),
+    0 2px 8px -4px rgba(90, 45, 120, 0.2);
+
+  /* Radii + motion */
+  --r-sm: 12px;
+  --r-md: 18px;
+  --r-lg: 26px;
+  --r-pill: 999px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Type */
+  --font-display: 'AA Zuehlke', Lato, system-ui, sans-serif;
+  --font-body: Lato, system-ui, -apple-system, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ok: #2ec76f;
+    --warn-ink: #f2a33c;
+    --danger: #ff6b7a;
+    --bg: #0b0813;
+    --bg-2: #120c1f;
+    --ink: #f3f0ff;
+    --ink-2: #b6afd4;
+    --ink-3: #7d7699;
+    --surface: #1e16348c;
+    --surface-2: #ffffff08;
+    --surface-solid: #171026;
+    --stroke: #a082ff29;
+    --stroke-strong: #a082ff80;
+    --chip: #a082ff24;
+    --nav-active: #ffffff0f;
+    --bubble-own: #6c3f79;
+    --brand-ink: #c9a6e3;
+    --glass-blur: 24px;
+    --card-shadow:
+      0 24px 60px -28px rgba(0, 0, 0, 0.8),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font: 16px/1.5 var(--font-body);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100svh;
+  background: var(--bg);
+  color: var(--ink);
+  caret-color: var(--brand);
+  transition: background-color 0.3s var(--ease);
+}
+
+/* Ambient shader: the purple→cyan field breathing behind the glass.
+   Static triple-radial fallback under reduced motion (DESIGN.md, Motion). */
+body::before {
+  content: '';
+  position: fixed;
+  inset: -30%;
+  z-index: -1;
+  background:
+    radial-gradient(40% 45% at 22% 20%, #aa41af30, transparent 70%),
+    radial-gradient(45% 50% at 80% 25%, #3c69c82b, transparent 70%),
+    radial-gradient(50% 45% at 50% 90%, #00a5e629, transparent 70%);
+  filter: blur(50px);
+  animation: ambient-drift 42s ease-in-out infinite alternate;
+}
+
+@keyframes ambient-drift {
+  from {
+    transform: translate3d(-2.5%, -1.5%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(2.5%, 1.5%, 0) scale(1.06);
+  }
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+::selection {
+  background: var(--chip);
+  color: var(--brand-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* ---------- Type recipes (DESIGN.md, integer ramp 11·12·13·14·15·16·20) ---------- */
+
+.display {
+  font-family: var(--font-display);
+  font-size: clamp(22px, 2.4vw, 30px);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.meta {
+  font-size: 12px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- The one glass recipe ---------- */
+
+.card {
+  position: relative;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-lg);
+  box-shadow: var(--card-shadow);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  padding: 26px;
+}
+
+/* Top-edge sheen — part of the recipe, not decoration. */
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+  pointer-events: none;
+}
+
+/* ---------- Brand mark + avatars (gradient-licensed surfaces) ---------- */
+
+.brand-mark {
+  display: inline-block;
+  width: 30px;
+  height: 30px;
+  border-radius: 11px;
+  background: var(--brand-grad);
+}
+
+.brand-mark--sm {
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+}
+
+.avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--brand-grad);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.avatar--sm {
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+}
+
+/* ---------- Buttons (one family, pill, 50px) ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 50px;
+  padding: 0 26px;
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 0.2s var(--ease),
+    border-color 0.2s var(--ease),
+    transform 0.3s var(--ease);
+}
+
+.btn-secondary {
+  background: var(--chip);
+  color: var(--brand-ink);
+  border-color: var(--stroke);
+}
+
+.btn-secondary:hover {
+  background: var(--surface-solid);
+  border-color: var(--stroke-strong);
+  transform: translateY(-2px);
+}
+
+.btn-ghost {
+  background: var(--surface);
+  color: var(--brand-ink);
+  border-color: var(--stroke);
+}
+
+.btn-ghost:hover {
+  border-color: var(--stroke-strong);
+  transform: translateY(-2px);
+}
+
+/* ---------- Identity selection gate ---------- */
+
+.gate {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.gate-card {
+  width: min(430px, 100%);
+  text-align: center;
+}
+
+.gate-greeting {
+  margin: 18px 0 9px;
+}
+
+.gate-subcopy {
+  margin: 0;
+  font-size: 15px;
+  color: var(--ink-2);
+  text-wrap: pretty;
+}
+
+.gate-status {
+  margin: 24px 0 0;
+}
+
+.identity-list {
+  list-style: none;
+  margin: 24px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.identity-tile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 64px;
+  padding: 14px 18px;
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-md);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.2s var(--ease),
+    border-color 0.2s var(--ease),
+    transform 0.3s var(--ease);
+}
+
+.identity-tile:hover {
+  background: var(--surface-solid);
+  border-color: var(--stroke-strong);
+  transform: translateY(-2px);
+}
+
+.identity-tile:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--chip);
+  border-color: var(--brand);
+}
+
+.identity-name {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.identity-loading {
+  margin-top: 24px;
+}
+
+.identity-skeleton {
+  height: 64px;
+  border-radius: var(--r-md);
+  background: var(--chip);
+  border: 1px solid var(--stroke);
+  animation: skeleton-pulse 1.4s var(--ease) infinite;
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.gate-error {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.gate-error-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.gate-error-detail {
+  margin: 0;
+}
+
+/* ---------- App shell (chat layout) ---------- */
+
+.shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--stroke);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+.app-header-brand,
+.app-header-user {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.app-header .btn-ghost {
+  height: 44px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 14px 6px 6px;
+  background: var(--chip);
+  color: var(--brand-ink);
+  border-radius: var(--r-pill);
+  font-size: 15px;
+}
+
+/* ---------- Connection availability indicator (task 6.6) ---------- */
+
+/* The live-region wrapper: always mounted (empty while connected) so the
+   role="status" target never enters or leaves the accessibility tree — only
+   its content changes. */
+.connection-status {
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+
+/* Pill recipe from DESIGN.md's connection-banner token: warn-tinted fill,
+   pill radius, words carrying the state with the dot as the second signal. */
+.connection-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 14px;
+  line-height: 1.3;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-pill);
+  animation: connection-status-enter 240ms var(--ease);
+}
+
+/* The spec's "temporarily unavailable" state: calm, never a red alarm bar —
+   the dot carries the warn hue and tint, the words stay legible ink. */
+.connection-status-pill--warn {
+  color: var(--ink);
+  background: var(--warn-tint);
+  border-color: var(--warn-stroke);
+}
+
+.connection-status-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: var(--r-pill);
+  background: var(--ink-3);
+}
+
+.connection-status-pill--warn .connection-status-dot {
+  background: var(--warn);
+}
+
+@keyframes connection-status-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.shell-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px;
+  align-items: stretch;
+}
+
+/* ---------- Conversation rail ---------- */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.rail-title {
+  margin: 0;
+  padding: 0 6px;
+}
+
+.rail-status {
+  margin: 0;
+  padding: 0 6px;
+}
+
+.conversation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.conversation-tile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 64px;
+  padding: 14px 18px;
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-md);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.2s var(--ease),
+    border-color 0.2s var(--ease),
+    transform 0.3s var(--ease);
+}
+
+.conversation-tile:hover {
+  background: var(--surface-solid);
+  border-color: var(--stroke-strong);
+  transform: translateY(-2px);
+}
+
+.conversation-tile:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--chip);
+  border-color: var(--brand);
+}
+
+.conversation-tile--active {
+  background: var(--nav-active);
+  border-color: var(--stroke-strong);
+}
+
+.conversation-name {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.conversation-skeleton {
+  height: 64px;
+  border-radius: var(--r-md);
+  background: var(--chip);
+  border: 1px solid var(--stroke);
+  animation: skeleton-pulse 1.4s var(--ease) infinite;
+}
+
+.rail-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 0 6px;
+}
+
+.rail-error-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.rail-error-detail {
+  margin: 0;
+}
+
+.rail-retry {
+  height: 44px;
+  padding: 0 20px;
+}
+
+/* ---------- Thread pane (task 5.3) ---------- */
+
+/* The pane keeps the card's glass but zeroes its padding so the header and
+   the scroll region can run edge to edge; radius is preserved by clipping. */
+.thread-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.thread-header {
+  display: flex;
+  align-items: center;
+  min-height: 64px;
+  padding: 0 26px;
+  border-bottom: 1px solid var(--stroke);
+}
+
+.thread-header .title {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Message region: content capped at 860px and centered (DESIGN.md, Thread
+   column), 24px 34px padding on desktop. */
+.thread-region {
+  max-width: 860px;
+  margin-inline: auto;
+  padding: 24px 34px;
+}
+
+.thread-region--center {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.thread-status {
+  margin: 0 0 14px;
+  text-align: center;
+}
+
+.thread-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+}
+
+.thread-empty .title,
+.thread-empty .meta {
+  margin: 0;
+}
+
+.thread-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.thread-error-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.thread-error-detail {
+  margin: 0;
+}
+
+.thread-retry {
+  height: 44px;
+  padding: 0 20px;
+}
+
+/* Message list: spacing does the grouping — 18px between senders, 4px
+   between consecutive bubbles of one sender (DESIGN.md, Thread rhythm). */
+.message-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.message-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.message-group--own {
+  align-items: flex-end;
+}
+
+.message-sender {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 4px;
+}
+
+/* Names carry the display face (Display-Is-For-People). */
+.message-sender-name {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Own words get the single saturated fill; the other side is neutral glass.
+   Bubbles sit flat in the room: a hairline plus the bubble-rest whisper, never
+   the pane shadow (Thread-Is-Flat). Cap min(72ch, 68%) so the left/right
+   authorship read stays unambiguous. */
+.message-bubble {
+  margin: 0;
+  max-width: min(72ch, 68%);
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message-bubble--own {
+  background: var(--bubble-own);
+  color: #ffffff;
+}
+
+.message-bubble--other {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  color: var(--ink);
+  box-shadow: 0 1px 2px -1px rgba(90, 45, 120, 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+  .message-bubble--other {
+    box-shadow: none;
+  }
+}
+
+/* The One Asymmetric Corner Rule: only the group's last bubble takes the 6px
+   corner nearest its author's edge. */
+.message-bubble--corner-own {
+  border-bottom-right-radius: 6px;
+}
+
+.message-bubble--corner-other {
+  border-bottom-left-radius: 6px;
+}
+
+/* Meta lives outside the bubble, below it, 12px ink-3 (Message-Reads-First). */
+.message-meta {
+  margin-top: 4px;
+}
+
+.message-skeleton {
+  width: 45%;
+  height: 44px;
+  border-radius: var(--r-md);
+  background: var(--chip);
+  border: 1px solid var(--stroke);
+  animation: skeleton-pulse 1.4s var(--ease) infinite;
+}
+
+.message-skeleton--own {
+  align-self: flex-end;
+  width: 60%;
+  background: var(--surface-2);
+}
+
+/* Pending bubbles (task 6.3): own-style fill, subdued via a static opacity so
+   the optimistic state reads at a glance without any motion — the explicit
+   status word beside it carries the state for screen readers. */
+.message-bubble--pending {
+  opacity: 0.55;
+}
+
+.message-meta--failed {
+  color: var(--danger);
+}
+
+/* ---------- Composer (task 6.3) ---------- */
+
+/* Anchored to the pane's bottom edge, separated from the thread by the same
+   hairline as the header; background keeps glass language per the recipe. */
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 14px 26px;
+  border-top: 1px solid var(--stroke);
+  background: var(--surface-2);
+}
+
+.composer-input {
+  flex: 1;
+  min-height: 44px;
+  max-height: 132px;
+  padding: 10px 14px;
+  background: var(--surface-solid);
+  color: var(--ink);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-md);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  resize: none;
+}
+
+.composer-input::placeholder {
+  color: var(--ink-3);
+}
+
+.composer-input:focus-visible {
+  border-color: var(--stroke-strong);
+}
+
+/* The one saturated action in the pane: same fill as the author's bubbles. */
+.composer-send {
+  height: 44px;
+  background: var(--bubble-own);
+  color: #ffffff;
+}
+
+.composer-send:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.composer-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Narrow viewports: rail stacks above the thread; thread padding drops to
+   18px and bubbles cap at 82% (DESIGN.md, Responsive). */
+@media (max-width: 720px) {
+  .shell-body {
+    grid-template-columns: 1fr;
+  }
+
+  .thread-region {
+    padding: 18px;
+  }
+
+  .thread-header {
+    padding: 0 18px;
+  }
+
+  .composer {
+    padding: 12px 18px;
+  }
+
+  .message-bubble {
+    max-width: 82%;
+  }
+}
+
+/* ---------- Reduced motion: resolve to end states ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    animation: none;
+  }
+
+  .identity-skeleton,
+  .conversation-skeleton,
+  .message-skeleton {
+    animation: none;
+    opacity: 0.6;
+  }
+
+  .connection-status-pill {
+    animation: none;
+  }
+
+  .btn,
+  .identity-tile,
+  .conversation-tile,
+  body {
+    transition: none;
+  }
+}
