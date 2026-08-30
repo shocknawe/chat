@@ -72,16 +72,16 @@ is never cut (slices 2–4 depend on it to be demonstrable).
 
 ## 6. Slice 5 — Connection state
 
-- [ ] 6.1 Add `reconnectNow()` to `ChatSocket`: cancel scheduled backoff and attempt immediately; no-op while connected, after `terminate()`, **and** while a connection attempt is already in flight (`scheduleReconnect` nulls `retryTimer` before calling `connect()`, so "no timer" does not mean "not attempting")
-- [ ] 6.1a Make `connect()` detach listeners from and close any prior socket before opening a new one — it currently reassigns `socket` without doing so, which can leave two live sockets, two registry entries for one user (presence reports online after the real one closes), and duplicate `NEW_MESSAGE` frames
-- [ ] 6.2 Add the always-visible connection pill (word plus dot, never colour alone)
-- [ ] 6.3 Add the in-thread offline banner, offline composer copy, and waiting-for-connection wording on queued messages
-- [ ] 6.4 Add the transient recovery confirmation (timer-based withdrawal)
-- [ ] 6.5 Add `dropConnection()` to `ChatSocket` — closes the underlying socket with a non-1000 code so the normal reconnect path engages and the pending queue survives (`terminate()` is the wrong primitive: it is irreversible and would end the demo rather than show recovery) — and gate only the *UI control* on `import.meta.env.DEV` so it is stripped from production builds
-- [ ] 6.6 Retain correlated error code and reason against the message; word rejections from the code, not the reason text
-- [ ] 6.7 Verify queued messages flush under original `clientMessageId`s on restore, each acknowledged exactly once
-- [ ] 6.8 Add a retry control on rejected messages that re-submits under the original `clientMessageId` and never re-submits automatically (today a failed bubble is deliberately never retried and never removed; `chatSocket` drops the queue entry on a correlated `ERROR`, so re-calling `sendMessage` with the same token is not deduped)
-- [ ] 6.9 Test: a rejected message is not re-submitted without user action, and manual retry reuses the original client message identifier
+- [x] 6.1 Add `reconnectNow()` to `ChatSocket`: cancel scheduled backoff and attempt immediately; no-op while connected, after `terminate()`, **and** while a connection attempt is already in flight (`scheduleReconnect` nulls `retryTimer` before calling `connect()`, so "no timer" does not mean "not attempting")
+- [x] 6.1a Make `connect()` detach listeners from and close any prior socket before opening a new one — it currently reassigns `socket` without doing so, which can leave two live sockets, two registry entries for one user (presence reports online after the real one closes), and duplicate `NEW_MESSAGE` frames
+- [x] 6.2 Add the always-visible connection pill (word plus dot, never colour alone)
+- [x] 6.3 Add the in-thread offline banner, offline composer copy, and waiting-for-connection wording on queued messages
+- [x] 6.4 Add the transient recovery confirmation (timer-based withdrawal)
+- [x] 6.5 Add `dropConnection()` to `ChatSocket` — closes the underlying socket with a non-1000 code so the normal reconnect path engages and the pending queue survives (`terminate()` is the wrong primitive: it is irreversible and would end the demo rather than show recovery) — and gate only the *UI control* on `import.meta.env.DEV` so it is stripped from production builds
+- [x] 6.6 Retain correlated error code and reason against the message; word rejections from the code, not the reason text
+- [x] 6.7 Verify queued messages flush under original `clientMessageId`s on restore, each acknowledged exactly once
+- [x] 6.8 Add a retry control on rejected messages that re-submits under the original `clientMessageId` and never re-submits automatically (today a failed bubble is deliberately never retried and never removed; `chatSocket` drops the queue entry on a correlated `ERROR`, so re-calling `sendMessage` with the same token is not deduped)
+- [x] 6.9 Test: a rejected message is not re-submitted without user action, and manual retry reuses the original client message identifier
 
 ## 7. Slice 6 — Info drawer and correlation token
 

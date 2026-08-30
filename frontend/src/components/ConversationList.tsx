@@ -14,11 +14,13 @@ import { initials } from '../initials'
  * joined. Only if a conversation somehow has no other participant do we fall
  * back to a shortened-id label — no invented fields.
  *
- * Rail preview (tasks 4.2–4.3): under the label the row summarises the latest
- * activity — the conversation's server-provided `lastMessage` content
- * (truncated by CSS), "Sending…"/"Failed to send" while the current user's
- * newest message there is awaiting acknowledgement/rejected (the same status
- * words the thread uses), or "No messages yet" for an empty history. The
+ * Rail preview (tasks 4.2–4.3, slice 5 task 6.3): under the label the row
+ * summarises the latest activity — the conversation's server-provided
+ * `lastMessage` content (truncated by CSS), "Sending…" / "Waiting for
+ * connection…" / "Failed to send" while the current user's newest message
+ * there is awaiting acknowledgement (offline wording while realtime is
+ * down) / rejected (the same status words the thread uses), or "No messages
+ * yet" for an empty history. The
  * preview is marked `aria-hidden`: the row's accessible name stays the
  * conversation label so identity-first navigation ("Bob") is not buried under
  * a message-length name — the full content is one activation away in the
@@ -67,6 +69,12 @@ interface ConversationListProps {
    */
   pendingMessages: PendingMessage[]
   /**
+   * Slice 5 (task 6.3): true while realtime messaging is unavailable, so a
+   * queued (not yet acked) own message reads "Waiting for connection…" —
+   * the same word the thread's bubbles use — instead of "Sending…".
+   */
+  waitingForConnection?: boolean
+  /**
    * The current WHOLESALE online-partner snapshot (task 5.4), owned by
    * `SignedInShell` and replaced — never merged — on every PRESENCE event.
    * Empty until the socket's first snapshot arrives, so rows read "Offline"
@@ -98,6 +106,7 @@ export function ConversationList({
   error,
   onRetry,
   pendingMessages,
+  waitingForConnection = false,
   onlineUserIds,
   selectedId,
   onSelect,
@@ -208,7 +217,9 @@ export function ConversationList({
                         Truncated by CSS, never by code: the full content lives
                         in the thread. */}
                     <span className="conversation-preview" aria-hidden="true">
-                      {conversationPreview(conversation, pendingMessages)}
+                      {conversationPreview(conversation, pendingMessages, {
+                        waitingForConnection,
+                      })}
                     </span>
                   </span>
                   {' '}

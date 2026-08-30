@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { createConversation, fetchConversations, fetchUsers, type Conversation, type User } from './api'
+import {
+  createConversation,
+  fetchConversations,
+  fetchUsers,
+  type Conversation,
+  type User,
+} from './api'
 import {
   clearStoredConversationId,
   clearStoredUserId,
@@ -17,7 +23,7 @@ import { UserSelectScreen } from './components/UserSelectScreen'
 import { useAnnouncer } from './hooks/useAnnouncer'
 import { useChatSocket } from './hooks/useChatSocket'
 import { COMPACT_QUERY, useMediaQuery } from './hooks/useMediaQuery'
-import { usePendingMessages } from './hooks/usePendingMessages'
+import { type PendingMessage, usePendingMessages } from './hooks/usePendingMessages'
 import { useTheme } from './hooks/useTheme'
 import { initials } from './initials'
 import { patchConversationPreview, upsertAuthoritativeMessage } from './messagesCache'
@@ -115,6 +121,15 @@ interface SignedInShellProps {
  * referentially stable across renders.
  */
 const INITIAL_ONLINE_USER_IDS: ReadonlySet<string> = new Set()
+
+/**
+ * Slice 5 (task 6.4): how long the transient recovery confirmation stays in
+ * the conversation before withdrawing itself. Timer-based per design.md
+ * decision (resolved open question 4) — no user action is involved — and
+ * long enough to actually be read; the one-shot design withdraws the same
+ * banner, sooner, in its scripted demo.
+ */
+const RECOVERY_NOTICE_MS = 4000
 
 /**
  * Every overlay the shell can present, exclusively one at a time (task 2.6
@@ -247,7 +262,8 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
   // ancestor of ThreadPane (renders it) and the socket handlers (6.4 mutates
   // it via `removePending`/`markPendingFailed`) — and is keyed to this
   // identity by the shell's `key`, so a user switch resets it automatically.
-  const { pendingMessages, addPending, removePending, markPendingFailed } = usePendingMessages()
+  const { pendingMessages, addPending, removePending, markPendingFailed, markPendingRetry } =
+    usePendingMessages()
 
   /**
    * Task 6.4 pending→authoritative reconciliation. The backend ack always
@@ -276,17 +292,20 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
   )
 
   /**
-   * Task 6.4 failure path: a correlated error (`clientMessageId` present)
-   * flips the matching pending item to `failed` — the bubble stays rendered
-   * with the "Failed to send" status, is never retried, and is never removed.
-   * If no pending item matches (e.g. the ack already won the race),
-   * `markPendingFailed` is a harmless no-op. Uncorrelated errors (unparseable
-   * frames, etc.) carry no `clientMessageId` and are logged visibly.
+   * Task 6.4 failure path, tightened by slice 5's task 6.6: a correlated
+   * error (`clientMessageId` present) flips the matching pending item to
+   * `failed` and RETAINS the error's code and reason against it — the
+   * bubble stays rendered, worded from the CODE (`rejectionWording`), never
+   * from `reason` (a server debug string), and is re-submitted only through
+   * its explicit retry control (task 6.8). If no pending item matches (e.g.
+   * the ack already won the race), `markPendingFailed` is a harmless no-op.
+   * Uncorrelated errors (unparseable frames, etc.) carry no
+   * `clientMessageId` and are logged visibly.
    */
   const handleRealtimeError = useCallback(
     (event: ErrorEvent) => {
       if (event.clientMessageId !== undefined) {
-        markPendingFailed(event.clientMessageId)
+        markPendingFailed(event.clientMessageId, { code: event.code, reason: event.reason })
         // Task 2.7: delivery-status change, announced in words.
         announce('Message failed to send')
         return
@@ -372,20 +391,6 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
     setOnlineUserIds(new Set(event.online))
   }, [])
 
-  // Realtime connection (task 6.2): the socket lifecycle is bound to this
-  // identity — created once `currentUser` is established (this shell only
-  // renders then) and terminated on user switch/unmount. `sendMessage` is
-  // consumed by the submit path below, the ack/error handlers are 6.4, the
-  // new-message handler is 6.5 (all wired here), and `connectionState` feeds
-  // the task-6.6 availability indicator and the reconnect history refresh.
-  const { sendMessage, connectionState } = useChatSocket(user.id, {
-    onMessageAck: handleMessageAck,
-    onNewMessage: handleNewMessage,
-    onRealtimeError: handleRealtimeError,
-    onConversationCreated: handleConversationCreated,
-    onPresence: handlePresence,
-  })
-
   /**
    * Task 6.3 submit path. `content` arrives already boundary-trimmed and
    * guaranteed non-blank by the composer (it mirrors what the backend will
@@ -420,6 +425,144 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
 
   const selectedConversation =
     conversationsQuery.data?.find((c) => c.id === selectedConversationId) ?? null
+
+  /**
+   * Task 6.6 reconnect recovery, classification refs. The window between an
+   * unexpected disconnect and the reconnect can contain messages whose
+   * NEW_MESSAGE events never reached this window ("Message recoverable after
+   * missed delivery"). Recovery: on every transition INTO `connected` AFTER
+   * this shell instance's first connection, invalidate the active
+   * conversation's history so TanStack Query refetches it from the backend.
+   *
+   * Initial-connect exclusion: `hasConnectedRef` distinguishes the two cases —
+   * the FIRST `connected` of a shell instance must NOT refetch, because the
+   * messages query already owns initial history load (mount-time fetch).
+   *
+   * StrictMode/user-switch safety: the shell mounts fresh per identity (keyed
+   * on `user.id`), so the refs reset; the StrictMode double-socket still
+   * reports exactly one connected transition (socket A is terminated before
+   * it can open), which the ref correctly classifies as the initial connect.
+   *
+   * Merge safety: the refetch commits through the task-6.7 history merge
+   * (`fetchMergedHistory` → `mergeHistoryWithCache`), which unions the
+   * response with any realtime upserts that landed while the request was in
+   * flight — a newer WebSocket message can be neither erased nor duplicated
+   * by the commit. This invalidation is the spec's recovery mechanism; the
+   * merge is what makes it safe.
+   */
+  const hasConnectedRef = useRef(false)
+  const prevConnectionStateRef = useRef<ConnectionState>('connecting')
+  /**
+   * Slice 5 (task 6.4): the transient recovery confirmation. Raised as part
+   * of the SAME classified transition into `connected` that triggers the
+   * missed-history refresh, so the thread states the recovery at the moment
+   * it happens; withdrawn on a timer (`RECOVERY_NOTICE_MS`) with no user
+   * action, and immediately if the connection drops again (the offline
+   * banner takes over — a stale "Reconnected" beside it would be a lie).
+   */
+  const [recoveryNotice, setRecoveryNotice] = useState(false)
+  const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Unmount/identity-switch (the shell is keyed on `user.id`) must not leave
+  // the withdrawal timer firing into a dead component.
+  useEffect(
+    () => () => {
+      if (recoveryTimerRef.current !== null) clearTimeout(recoveryTimerRef.current)
+    },
+    [],
+  )
+
+  /**
+   * Connection-state transition handler (a socket event, not a render
+   * effect). Classifies each transition into `connected` as initial-or-
+   * reconnect for the missed-history refresh (task 6.6) and raises (or
+   * withdraws) the transient recovery confirmation (slice 5, task 6.4).
+   * Consequences of a transition belong here, where the transition itself —
+   * previous vs next state — is observable.
+   */
+  const handleConnectionStateChange = useCallback(
+    (next: ConnectionState) => {
+      const prevState = prevConnectionStateRef.current
+      prevConnectionStateRef.current = next
+
+      if (next !== 'connected') {
+        // Not connected any more: the recovery confirmation yields to the
+        // offline banner rather than lingering beside it.
+        setRecoveryNotice(false)
+        return
+      }
+
+      const isReconnect = hasConnectedRef.current && prevState !== 'connected'
+      hasConnectedRef.current = true
+
+      if (!isReconnect) return
+
+      // The ACTIVE conversation's history is the one that must recover. The
+      // hook routes the newest handler (this callback re-arms whenever the
+      // selection changes), so this reads the current selection, never a
+      // render-frozen one.
+      if (selectedConversationId !== null) {
+        void queryClient.invalidateQueries({
+          queryKey: ['messages', user.id, selectedConversationId],
+        })
+      }
+
+      // Task 6.4: confirm the recovery in words, then withdraw it without
+      // user action after a short pause.
+      setRecoveryNotice(true)
+      if (recoveryTimerRef.current !== null) clearTimeout(recoveryTimerRef.current)
+      recoveryTimerRef.current = setTimeout(() => {
+        recoveryTimerRef.current = null
+        setRecoveryNotice(false)
+      }, RECOVERY_NOTICE_MS)
+    },
+    [user.id, selectedConversationId],
+  )
+
+  // Realtime connection (task 6.2): the socket lifecycle is bound to this
+  // identity — created once `currentUser` is established (this shell only
+  // renders then) and terminated on user switch/unmount. `sendMessage` is
+  // consumed by the submit path below, the ack/error handlers are 6.4, the
+  // new-message handler is 6.5 (all wired here), and `connectionState` feeds
+  // the task-6.6 availability indicator and the reconnect history refresh.
+  // Slice 5: `reconnectNow` backs the "Reconnect now" control (6.1) and
+  // `dropConnection` backs the DEV-only demo cut (6.5).
+  const { sendMessage, connectionState, reconnectNow, dropConnection } = useChatSocket(user.id, {
+    onMessageAck: handleMessageAck,
+    onNewMessage: handleNewMessage,
+    onRealtimeError: handleRealtimeError,
+    onConversationCreated: handleConversationCreated,
+    onPresence: handlePresence,
+    onStateChange: handleConnectionStateChange,
+  })
+
+  /**
+   * Task 6.8: the ONLY path back for a rejected message — the per-bubble
+   * control the thread pane renders. Two invariants the spec calls out:
+   *
+   * - Re-submission is under the ORIGINAL `clientMessageId`: a correlated
+   *   ERROR removed the command's queue entry inside the socket (it was a
+   *   final rejection, so `chatSocket` dropped it), which means a fresh
+   *   `sendMessage` with the same token is NOT deduped — it re-sends for
+   *   real, while still carrying the same idempotency key (a server that
+   *   persisted the first attempt despite the rejected response resolves to
+   *   the existing message; a server that didn't stores it once).
+   * - Never automatic: nothing in the app calls this without the user's
+   *   explicit activation. The socket's own queue only re-sends PENDING
+   *   (unacknowledged, un-rejected) commands, never a failed one.
+   */
+  const handleRetryMessage = useCallback(
+    (pending: PendingMessage) => {
+      markPendingRetry(pending.clientMessageId)
+      sendMessage({
+        clientMessageId: pending.clientMessageId,
+        conversationId: pending.conversationId,
+        content: pending.content,
+      })
+      // Task 2.7: delivery-status change, announced in words.
+      announce('Trying to send the message again')
+    },
+    [markPendingRetry, sendMessage, announce],
+  )
 
   /**
    * Task 3.5: the creation dialog's candidate list — every directory user the
@@ -477,7 +620,7 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
       )
       return conversation
     },
-    [user.id, announce],
+    [user.id, announce, setSelectedConversationId],
   )
 
   // Restored-selection validation: once the conversations list arrives, a
@@ -495,50 +638,6 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
       setSelectedConversationId(null)
     }
   }, [conversationsQuery.data, selectedConversationId, user.id])
-
-  /**
-   * Task 6.6 reconnect recovery. The window between an unexpected disconnect
-   * and the reconnect can contain messages whose NEW_MESSAGE events never
-   * reached this window (server-side: "Message recoverable after missed
-   * delivery"). Recovery: on every transition INTO `connected` AFTER this
-   * shell instance's first connection, invalidate the active conversation's
-   * history so TanStack Query refetches it from the backend.
-   *
-   * Initial-connect exclusion: `hasConnectedRef` distinguishes the two cases —
-   * the FIRST `connected` of a shell instance must NOT refetch, because the
-   * messages query already owns initial history load (mount-time fetch).
-   * `prevConnectionStateRef` guards the effect's dependencies: re-running the
-   * effect for a conversation switch while already `connected` is not a
-   * reconnect and must not refetch either.
-   *
-   * StrictMode/user-switch safety: the shell mounts fresh per identity (keyed
-   * on `user.id`), so both refs reset; the StrictMode double-socket still
-   * reports exactly one connected transition (socket A is terminated before
-   * it can open), which the ref correctly classifies as the initial connect.
-   *
-   * Merge safety: this refetch commits through the task-6.7 history merge
-   * (`fetchMergedHistory` → `mergeHistoryWithCache`), which unions the
-   * response with any realtime upserts that landed while the request was in
-   * flight — a newer WebSocket message can be neither erased nor duplicated
-   * by the commit. This invalidation is the spec's recovery mechanism; the
-   * merge is what makes it safe.
-   */
-  const hasConnectedRef = useRef(false)
-  const prevConnectionStateRef = useRef<ConnectionState>(connectionState)
-  useEffect(() => {
-    const prevState = prevConnectionStateRef.current
-    prevConnectionStateRef.current = connectionState
-
-    if (connectionState !== 'connected') return
-    const isReconnect = hasConnectedRef.current && prevState !== 'connected'
-    hasConnectedRef.current = true
-
-    if (isReconnect && selectedConversationId !== null) {
-      void queryClient.invalidateQueries({
-        queryKey: ['messages', user.id, selectedConversationId],
-      })
-    }
-  }, [connectionState, user.id, selectedConversationId])
 
   const handleSelectConversation = (conversationId: string) => {
     storeConversationId(user.id, conversationId)
@@ -592,6 +691,22 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
         </div>
         <div className="app-header-user">
           <ConnectionStatus state={connectionState} />
+          {/* Slice 5 (task 6.5): the ONLY connection-severing control in the
+              app, gated on `import.meta.env.DEV` so the control's string and
+              click handler are stripped from production bundles (the spec:
+              a production build contains no intentional-severing control).
+              The gate deliberately wraps the CONTROL only — `dropConnection`
+              itself stays public on the socket and is exercised by tests. */}
+          {import.meta.env.DEV && (
+            <button
+              type="button"
+              className="btn btn-ghost dev-drop-connection"
+              onClick={dropConnection}
+              title="Drop connection (demo)"
+            >
+              Drop connection
+            </button>
+          )}
           <button
             type="button"
             className="icon-button theme-toggle"
@@ -644,6 +759,7 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
           onRetry={() => void conversationsQuery.refetch()}
           pendingMessages={pendingMessages}
           onlineUserIds={onlineUserIds}
+          waitingForConnection={connectionState !== 'connected'}
           selectedId={selectedConversationId}
           onSelect={handleSelectConversation}
           isCompact={isCompact}
@@ -656,6 +772,10 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
           currentUser={user}
           conversation={selectedConversation}
           pendingMessages={pendingMessages}
+          connectionState={connectionState}
+          recoveryNotice={recoveryNotice}
+          onReconnectNow={reconnectNow}
+          onRetryMessage={handleRetryMessage}
           composerFocusRef={composerRef}
           onSendMessage={(content) => {
             if (selectedConversation !== null) {

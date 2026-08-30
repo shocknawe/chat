@@ -1207,6 +1207,74 @@ body[data-theme='dark'] .thread-scroll {
   margin: 0 0 10px;
 }
 
+/* ── In-thread connection banner + recovery line (slice 5, tasks 6.3–6.4) ──
+   Sits between the thread header and the message region, mirroring the
+   one-shot design: warn tint while unavailable — saying what is wrong AND
+   what is being done about it, plus the "Reconnect now" control — and an
+   ok tint for the transient recovery confirmation, which withdraws itself
+   on the shell's timer. Words carry the state; tint and dot are second
+   signals only (Status-Is-Text). */
+.thread-connection {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 18px;
+  padding: 10px 14px;
+  border: 1px solid var(--warn-line);
+  border-radius: 12px;
+  background: var(--warn-bg);
+}
+
+.thread-connection--restored {
+  border-color: var(--ok-line);
+  background: var(--ok-bg);
+}
+
+.thread-connection-copy {
+  margin: 0;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.thread-connection-copy strong {
+  font-weight: 800;
+}
+
+.thread-connection-detail {
+  color: var(--ink-3);
+}
+
+.thread-connection-retry {
+  flex: none;
+}
+
+/* Retry control on a rejected bubble (slice 5, task 6.8). A quiet text
+   button under the meta word: the failure is stated in words first, and the
+   control is the ONLY path back for a rejected message (never automatic). */
+.message-retry {
+  align-self: flex-start;
+  margin: 4px 3px 0;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  color: var(--danger);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.message-retry:hover,
+.message-retry:focus-visible {
+  color: var(--ink);
+}
+
 /* ── Composer (task 2.4) ────────────────────────────────────────────── */
 
 .composer {

@@ -63,6 +63,8 @@ function msg(
 interface CapturedSocket {
   options: ChatSocketOptions;
   sendMessage: ReturnType<typeof vi.fn>;
+  reconnectNow: ReturnType<typeof vi.fn>;
+  dropConnection: ReturnType<typeof vi.fn>;
 }
 
 let captured: CapturedSocket[] = [];
@@ -71,9 +73,13 @@ function installFakeChatSocket(): void {
   vi.spyOn(realtime, "createChatSocket").mockImplementation(
     (options: ChatSocketOptions): ChatSocket => {
       const sendMessage = vi.fn();
-      captured.push({ options, sendMessage });
+      const reconnectNow = vi.fn();
+      const dropConnection = vi.fn();
+      captured.push({ options, sendMessage, reconnectNow, dropConnection });
       return {
         sendMessage,
+        reconnectNow,
+        dropConnection,
         pendingCount: () => 0,
         getState: () => "connecting",
         terminate: vi.fn(),
@@ -82,10 +88,9 @@ function installFakeChatSocket(): void {
   );
 }
 
-async function renderSignedInOnConversation(): Promise<
-  ReturnType<typeof userEvent.setup>
-> {
-  const user = userEvent.setup();
+async function renderSignedInOnConversation(
+  user: ReturnType<typeof userEvent.setup> = userEvent.setup(),
+): Promise<ReturnType<typeof userEvent.setup>> {
   render(
     <QueryClientProvider client={queryClient}>
       <App />
@@ -98,6 +103,21 @@ async function renderSignedInOnConversation(): Promise<
   // sign-in flow must not depend on the partner's current presence state.
   await user.click(await screen.findByRole("button", { name: /^Bob\b/ }));
   return user;
+}
+
+/**
+ * Establishes an OPEN connection for the (single, faked) socket. Slice 5's
+ * task 6.3 makes queued wording honest about the connection state — pending
+ * while offline reads "Waiting for connection…" — so suites exercising the
+ * SENDING state must first connect. Suites exercising the offline states do
+ * NOT call this and drive `reconnecting`/`connected` transitions explicitly.
+ */
+function connectSocket(): void {
+  const socket = captured[0];
+  expect(socket).toBeDefined();
+  act(() => {
+    socket!.options.onStateChange?.("connected");
+  });
 }
 
 /** The conversation rail (slice 3 previews live here). */
@@ -134,6 +154,7 @@ describe("pending → sent/failed reconciliation (App-level)", () => {
   it("MESSAGE_ACK removes the pending bubble and renders the authoritative message once", async () => {
     vi.spyOn(api, "fetchMessages").mockResolvedValue([]);
     const user = await renderSignedInOnConversation();
+    connectSocket();
 
     const textbox = await screen.findByRole("textbox", {
       name: /message to bob/i,
@@ -174,6 +195,7 @@ describe("pending → sent/failed reconciliation (App-level)", () => {
   it("a correlated ERROR marks the pending bubble failed and never removes it", async () => {
     vi.spyOn(api, "fetchMessages").mockResolvedValue([]);
     const user = await renderSignedInOnConversation();
+    connectSocket();
 
     const textbox = await screen.findByRole("textbox", {
       name: /message to bob/i,
@@ -196,9 +218,18 @@ describe("pending → sent/failed reconciliation (App-level)", () => {
       });
     });
 
+    // The meta line words the rejection from the ERROR CODE (slice 5, task
+    // 6.6): "Failed to send" plus the fixed PERSISTENCE_ERROR wording — never
+    // the server's reason string ("boom").
     expect(
-      await within(threadPane()).findByText("Failed to send"),
+      await within(threadPane()).findByText(/Failed to send/),
     ).toBeInTheDocument();
+    expect(
+      within(threadPane()).getByText(
+        "Failed to send This message could not be saved.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(threadPane()).queryByText("boom")).not.toBeInTheDocument();
     // The rail reads the same failure (task 4.3 override) — the unscoped
     // getByText would now find two, so the assertions stay thread-scoped.
     expect(within(rail()).getByText("Failed to send")).toBeInTheDocument();
@@ -665,6 +696,198 @@ describe("conversation creation dialog — in-flight guard (task 3.8)", () => {
 });
 
 /**
+ * Slice 5 — connection state (OpenSpec tasks 6.2–6.8). The pill (6.2), the
+ * in-thread offline banner with waiting composer copy (6.3), the transient
+ * recovery confirmation (6.4), the rejection wording from the wire code
+ * (6.6), the manual retry under the original token (6.8/6.9), and the DEV
+ * connection-drop control (6.5). The transport is faked at
+ * `createChatSocket` exactly as the suites above do; fake timers (with real
+ * time advancement so `userEvent` still resolves) drive the recovery
+ * banner's withdrawal.
+ */
+describe("connection state surfaces (slice 5, tasks 6.2–6.4, 6.6–6.8)", () => {
+  beforeEach(() => {
+    vi.spyOn(api, "fetchMessages").mockResolvedValue([]);
+  });
+
+  it("the header pill states the state in words at ALL times, including while connected (task 6.2)", async () => {
+    await renderSignedInOnConversation();
+
+    // The initial state is stated too — a state that vanishes when healthy
+    // would be a colour-only signal by another name.
+    expect(screen.getByText("Connecting…")).toBeInTheDocument();
+
+    connectSocket();
+
+    expect(await screen.findByText("Connected")).toBeInTheDocument();
+  });
+
+  it("states the outage inside the conversation: offline banner, waiting composer copy, and waiting wording on queued messages (task 6.3)", async () => {
+    const user = await renderSignedInOnConversation();
+    const socket = captured[0]!;
+    act(() => {
+      socket.options.onStateChange?.("reconnecting");
+    });
+
+    // Banner in words — what is wrong AND what is being done about it.
+    expect(await within(threadPane()).findByText("Realtime messaging unavailable.")).toBeInTheDocument();
+    expect(
+      within(threadPane()).getByText("Reconnecting automatically; history is still available."),
+    ).toBeInTheDocument();
+
+    // The reconnect control is offered while unavailable (task 6.1's UI).
+    const reconnect = within(threadPane()).getByRole("button", { name: "Reconnect now" });
+
+    // The composer stays usable with waiting copy.
+    const textbox = screen.getByRole("textbox", { name: /message to bob/i });
+    expect(
+      screen.getByPlaceholderText("You can keep typing. Messages wait for the connection."),
+    ).toBeInTheDocument();
+    await user.type(textbox, "Offline draft");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    // The queued message is marked "waiting for connection", not "sending".
+    expect(await within(threadPane()).findByText("Waiting for connection…")).toBeInTheDocument();
+    expect(within(threadPane()).queryByText("Sending…")).not.toBeInTheDocument();
+
+    // Activating the control cancels the scheduled delay and dials now —
+    // delegated straight to the socket (whose no-op rules 6.1 specifies).
+    await user.click(reconnect);
+    expect(socket.reconnectNow).toHaveBeenCalledTimes(1);
+  });
+
+  it("confirms recovery transiently and withdraws the confirmation on its own timer (task 6.4)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const socket = await (async () => {
+      await renderSignedInOnConversation(user);
+      return captured[0]!;
+    })();
+    act(() => {
+      socket.options.onStateChange?.("connected");
+    });
+
+    // Outage…
+    act(() => {
+      socket.options.onStateChange?.("reconnecting");
+    });
+    expect(
+      await within(threadPane()).findByText("Realtime messaging unavailable."),
+    ).toBeInTheDocument();
+
+    // …then restore: the confirmation appears in the conversation.
+    act(() => {
+      socket.options.onStateChange?.("connected");
+    });
+    expect(await within(threadPane()).findByText("Reconnected.")).toBeInTheDocument();
+    expect(
+      within(threadPane()).getByText("Conversation history is up to date."),
+    ).toBeInTheDocument();
+    expect(
+      within(threadPane()).queryByText("Realtime messaging unavailable."),
+    ).not.toBeInTheDocument();
+
+    // It withdraws WITHOUT user action, on the shell's timer (~4s).
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    await waitFor(() =>
+      expect(within(threadPane()).queryByText("Reconnected.")).not.toBeInTheDocument(),
+    );
+    vi.useRealTimers();
+  });
+
+  it("words a rejected message from the error CODE, never from the reason text (task 6.6)", async () => {
+    const user = await renderSignedInOnConversation();
+    connectSocket();
+    const socket = captured[0]!;
+
+    const textbox = await screen.findByRole("textbox", { name: /message to bob/i });
+    await user.type(textbox, "Rejected draft");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const sent = socket.sendMessage.mock.calls[0]?.[0] as { clientMessageId: string };
+
+    act(() => {
+      socket.options.onEvent?.({
+        type: "ERROR",
+        clientMessageId: sent.clientMessageId,
+        code: "INVALID_COMMAND",
+        reason: "unrecognized field bodyExtra",
+      });
+    });
+
+    // Fixed words from the code table …
+    expect(
+      await within(threadPane()).findByText("Failed to send The server did not understand this message."),
+    ).toBeInTheDocument();
+    // … and the server's reason string appears NOWHERE as product copy.
+    expect(within(threadPane()).queryByText(/bodyExtra/)).not.toBeInTheDocument();
+  });
+
+  it("retries a rejected message ONLY on user action, under the ORIGINAL clientMessageId (tasks 6.8/6.9)", async () => {
+    const user = await renderSignedInOnConversation();
+    connectSocket();
+    const socket = captured[0]!;
+
+    const textbox = await screen.findByRole("textbox", { name: /message to bob/i });
+    await user.type(textbox, "This will fail");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const firstSend = socket.sendMessage.mock.calls[0]?.[0] as {
+      clientMessageId: string;
+      conversationId: string;
+      content: string;
+    };
+    expect(socket.sendMessage).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      socket.options.onEvent?.({
+        type: "ERROR",
+        clientMessageId: firstSend.clientMessageId,
+        code: "PERSISTENCE_ERROR",
+        reason: "boom",
+      });
+    });
+
+    // The retry control is the rejected bubble's only way back…
+    const retry = await within(threadPane()).findByRole("button", { name: "Try again" });
+
+    // …and until it is activated, NOTHING re-submits — not on the error, not
+    // on any later tick (no automatic retry).
+    await waitFor(() => expect(socket.sendMessage).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(socket.sendMessage).toHaveBeenCalledTimes(1));
+
+    await user.click(retry);
+
+    expect(socket.sendMessage).toHaveBeenCalledTimes(2);
+    const retrySend = socket.sendMessage.mock.calls[1]?.[0] as {
+      clientMessageId: string;
+      conversationId: string;
+      content: string;
+    };
+    expect(retrySend).toEqual(firstSend); // same token, conversation, content
+    expect(retrySend.clientMessageId).toBe(firstSend.clientMessageId);
+
+    // The bubble returns to the sending state for the new attempt.
+    await waitFor(() =>
+      expect(within(threadPane()).queryByText(/Failed to send/)).not.toBeInTheDocument(),
+    );
+    expect(within(threadPane()).getByText("Sending…")).toBeInTheDocument();
+  });
+
+  it("offers the DEV-only drop-connection control in a development build and delegates to the socket (task 6.5)", async () => {
+    const user = await renderSignedInOnConversation();
+    const socket = captured[0]!;
+
+    // `import.meta.env.DEV` is true under the test environment; the
+    // production build strips the control by the same flag's static
+    // replacement (vite define + dead-code elimination).
+    expect(screen.getByRole("button", { name: "Drop connection" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Drop connection" }));
+    expect(socket.dropConnection).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
  * Task 3.9: a `CONVERSATION_CREATED` event arrives on this session's socket
  * (someone else started a conversation with this user). The rail must add it
  * with an empty history — no refetch of the conversations listing, and the
@@ -763,6 +986,7 @@ describe("rail previews (tasks 4.2–4.6)", () => {
       { ...CONVERSATION, lastMessage: LATEST_FROM_BOB },
     ]);
     const user = await renderSignedInOnConversation();
+    connectSocket();
     expect(within(rail()).getByText("Latest from Bob")).toBeInTheDocument();
 
     const textbox = await screen.findByRole("textbox", {
@@ -783,6 +1007,7 @@ describe("rail previews (tasks 4.2–4.6)", () => {
       { ...CONVERSATION, lastMessage: LATEST_FROM_BOB },
     ]);
     const user = await renderSignedInOnConversation();
+    connectSocket();
 
     const textbox = await screen.findByRole("textbox", {
       name: /message to bob/i,
@@ -816,6 +1041,7 @@ describe("rail previews (tasks 4.2–4.6)", () => {
       .mockResolvedValue([{ ...CONVERSATION, lastMessage: LATEST_FROM_BOB }]);
     const user = await renderSignedInOnConversation();
     expect(fetchConversationsSpy).toHaveBeenCalledTimes(1);
+    connectSocket();
 
     const textbox = await screen.findByRole("textbox", {
       name: /message to bob/i,

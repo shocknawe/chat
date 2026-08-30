@@ -35,6 +35,14 @@ export const EMPTY_PREVIEW = 'No messages yet'
 /** The newest own message is awaiting acknowledgement (task 4.3). */
 export const SENDING_PREVIEW = 'Sending…'
 
+/**
+ * The newest own message is awaiting acknowledgement WHILE realtime
+ * messaging is unavailable (slice 5, task 6.3): the same pending state, but
+ * the honest word changes — the command is queued and will flush on
+ * connection, not being sent right now.
+ */
+export const WAITING_PREVIEW = 'Waiting for connection…'
+
 /** The newest own message was rejected (task 4.3). */
 export const FAILED_PREVIEW = 'Failed to send'
 
@@ -54,11 +62,16 @@ function latestPendingFor(
 
 /**
  * The rail preview text for `conversation`, applying the task-4.3
- * pending/failed override over the task-4.2 server preview.
+ * pending/failed override over the task-4.2 server preview. Slice 5 (task
+ * 6.3) adds the optional `waitingForConnection` wording for the queued state:
+ * the spec words this per-conversation context ("each waiting message is
+ * marked as waiting for connection"), so the rail keeps its rows consistent
+ * with the thread's bubbles while real-time messaging is unavailable.
  */
 export function conversationPreview(
   conversation: Pick<Conversation, 'id' | 'lastMessage'>,
   pendingMessages: readonly PendingMessage[],
+  { waitingForConnection = false }: { waitingForConnection?: boolean } = {},
 ): string {
   const pending = latestPendingFor(pendingMessages, conversation.id)
   // Task 4.0: absent === null. The backend OMITS the property for an empty
@@ -82,5 +95,6 @@ export function conversationPreview(
     return serverPreview
   }
 
-  return pending.status === 'failed' ? FAILED_PREVIEW : SENDING_PREVIEW
+  if (pending.status === 'failed') return FAILED_PREVIEW
+  return waitingForConnection ? WAITING_PREVIEW : SENDING_PREVIEW
 }

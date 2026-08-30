@@ -14,6 +14,7 @@ import {
   EMPTY_PREVIEW,
   FAILED_PREVIEW,
   SENDING_PREVIEW,
+  WAITING_PREVIEW,
 } from './conversationPreview'
 import type { PendingMessage } from './hooks/usePendingMessages'
 
@@ -128,6 +129,25 @@ describe('conversationPreview — pending/failed override (task 4.3)', () => {
         pending({ conversationId: 'conv-other', createdAt: '2026-08-30T11:00:00.000Z' }),
       ]),
     ).toBe(EMPTY_PREVIEW)
+  })
+
+  // Slice 5 (task 6.3): the queued word changes while realtime messaging is
+  // unavailable — the override stays "waiting for connection", not "sending",
+  // which is what the thread's bubbles read in the same state.
+  it('reads "Waiting for connection…" for a queued message while realtime is unavailable (task 6.3)', () => {
+    const options = { waitingForConnection: true } as const
+    expect(
+      conversationPreview(conversation(), [pending({ createdAt: '2026-08-30T12:00:00.000Z' })], options),
+    ).toBe(WAITING_PREVIEW)
+    expect(
+      conversationPreview(conversation(message('2026-08-30T11:00:00.000Z')), [pending()], options),
+    ).toBe('Waiting for connection…')
+    // A rejected item keeps its own word regardless of the connection.
+    expect(
+      conversationPreview(conversation(), [pending({ status: 'failed' })], options),
+    ).toBe(FAILED_PREVIEW)
+    // And with the connection up the word stays "Sending…" (default param).
+    expect(conversationPreview(conversation(), [pending()])).toBe(SENDING_PREVIEW)
   })
 
   it('uses the SUBMISSION-order newest pending item, not the first', () => {

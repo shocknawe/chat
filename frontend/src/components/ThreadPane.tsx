@@ -1,12 +1,18 @@
 import { Fragment, useEffect, useMemo, useRef, type MutableRefObject } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { type Conversation, type Message, type User } from '../api'
+import {
+  REJECTED_STATUS,
+  rejectionWording,
+} from '../rejectionWording'
 import { conversationLabel } from './ConversationList'
 import { Composer } from './Composer'
 import type { PendingMessage } from '../hooks/usePendingMessages'
 import { initials } from '../initials'
 import { compareMessages } from '../messageOrder'
 import { fetchMergedHistory } from '../messagesCache'
+import { SENDING_PREVIEW, WAITING_PREVIEW } from '../conversationPreview'
+import type { ConnectionState } from '../realtime'
 
 /**
  * Thread pane (task 5.3) — the selected conversation's message history.
@@ -113,6 +119,26 @@ interface ThreadPaneProps {
    * cache until 6.4 reconciles each item by `clientMessageId`.
    */
   pendingMessages: PendingMessage[]
+  /**
+   * Slice 5 (tasks 6.3/6.4): the live realtime connection state. Anything
+   * other than `connected` renders the in-thread offline banner (with the
+   * "Reconnect now" control, task 6.1) and switches the queued-bubble wording
+   * to "Waiting for connection…"; the composer gets its waiting copy too.
+   */
+  connectionState: ConnectionState
+  /**
+   * Slice 5 (task 6.4): a transient recovery confirmation the shell just
+   * raised (and will withdraw on its own timer). Rendered as an in-thread
+   * status line, never as a sticky banner.
+   */
+  recoveryNotice: boolean
+  /** Slice 5 (task 6.1): cancel the scheduled reconnect delay and dial now. */
+  onReconnectNow: () => void
+  /**
+   * Slice 5 (task 6.8): re-submits a rejected message under its ORIGINAL
+   * `clientMessageId`. The only retry path there is — never automatic.
+   */
+  onRetryMessage: (pending: PendingMessage) => void
   /** Submits a boundary-trimmed, non-empty draft for `conversation`. */
   onSendMessage: (content: string) => void
   /**
@@ -126,6 +152,10 @@ export function ThreadPane({
   currentUser,
   conversation,
   pendingMessages,
+  connectionState,
+  recoveryNotice,
+  onReconnectNow,
+  onRetryMessage,
   onSendMessage,
   composerFocusRef,
 }: ThreadPaneProps) {
@@ -268,6 +298,49 @@ export function ThreadPane({
           </svg>
         </button>
       </header>
+      {/* Slice 5, tasks 6.3/6.4: connection state stated INSIDE the
+          conversation, in words (Status-Is-Text). Two mutually exclusive
+          in-thread states, both replacing the other rather than stacking:
+          - offline: what is wrong AND what is being done about it, plus the
+            task-6.1 "Reconnect now" control (cancel the scheduled delay and
+            dial immediately — the socket's no-ops make the control safe).
+          - recovery: a transient "Reconnected" line the shell withdraws on
+            its own timer; no user action, no sticky confirmation. */}
+      {(connectionState !== 'connected' || recoveryNotice) && (
+        <div
+          className={
+            connectionState !== 'connected'
+              ? 'thread-connection thread-connection--offline'
+              : 'thread-connection thread-connection--restored'
+          }
+          role="status"
+        >
+          {connectionState !== 'connected' ? (
+            <>
+              <p className="thread-connection-copy">
+                <strong>Realtime messaging unavailable.</strong>{' '}
+                <span className="thread-connection-detail">
+                  Reconnecting automatically; history is still available.
+                </span>
+              </p>
+              <button
+                type="button"
+                className="btn btn-secondary thread-connection-retry"
+                onClick={onReconnectNow}
+              >
+                Reconnect now
+              </button>
+            </>
+          ) : (
+            <p className="thread-connection-copy">
+              <strong>Reconnected.</strong>{' '}
+              <span className="thread-connection-detail">
+                Conversation history is up to date.
+              </span>
+            </p>
+          )}
+        </div>
+      )}
       <div className="thread-scroll" ref={scrollRef} onScroll={handleScroll}>
         {messagesQuery.isPending && (
           <div className="thread-region">
@@ -387,7 +460,12 @@ export function ThreadPane({
                   <li className="message-group message-group--own" aria-label="Pending messages">
                     {/* Pending items are always the current user's own: they sit
                         under history, subdued, each with an explicit status word
-                        so the optimistic state is announced, not just tinted. */}
+                        so the optimistic state is announced, not just tinted.
+                        Slice 5 (task 6.3): the queued word becomes "Waiting for
+                        connection…" while realtime is down. (task 6.8): a
+                        rejected bubble words its rejection FROM THE ERROR CODE
+                        (task 6.6) and carries the only retry control there is —
+                        the submission is manual, under the original token. */}
                     {threadPending.map((pending) => (
                       <Fragment key={pending.clientMessageId}>
                         <p className="message-bubble message-bubble--own message-bubble--pending">
@@ -400,8 +478,21 @@ export function ThreadPane({
                               : 'meta message-meta'
                           }
                         >
-                          {pending.status === 'failed' ? 'Failed to send' : 'Sending…'}
+                          {pending.status === 'failed'
+                            ? `${REJECTED_STATUS} ${rejectionWording(pending.errorCode ?? '')}`
+                            : connectionState !== 'connected'
+                              ? WAITING_PREVIEW
+                              : SENDING_PREVIEW}
                         </span>
+                        {pending.status === 'failed' && (
+                          <button
+                            type="button"
+                            className="message-retry"
+                            onClick={() => onRetryMessage(pending)}
+                          >
+                            Try again
+                          </button>
+                        )}
                       </Fragment>
                     ))}
                   </li>
@@ -413,6 +504,7 @@ export function ThreadPane({
       </div>
       <Composer
         ariaLabel={`Message to ${otherName}`}
+        waitingForConnection={connectionState !== 'connected'}
         onSubmit={onSendMessage}
         focusRef={composerFocusRef}
       />

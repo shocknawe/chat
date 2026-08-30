@@ -55,6 +55,13 @@ export interface RealtimeEventHandlers {
   onConversationCreated?: (event: ConversationCreatedEvent) => void
   /** A full online-partner snapshot (task 5.4: wholesale presence replace). */
   onPresence?: (event: PresenceEvent) => void
+  /**
+   * Slice 5: every connection-state transition, in chronological order. The
+   * hook mirrors the latest state itself; consumers register this when the
+   * TRANSITION (previous → next) matters, e.g. the reconnect classification
+   * and the recovery confirmation in `App.tsx`.
+   */
+  onStateChange?: (state: ConnectionState) => void
 }
 
 export interface UseChatSocketResult {
@@ -66,6 +73,19 @@ export interface UseChatSocketResult {
    * (task 6.3's composer) supply the `clientMessageId`.
    */
   sendMessage: (command: Omit<SendMessageCommand, 'type'>) => void
+  /**
+   * Slice 5 (task 6.1): passthrough to the socket's cancel-backoff-and-dial-
+   * now control. Strict no-ops live inside the socket (connected, terminated,
+   * attempt already in flight), so the UI control is always enabled-safe.
+   */
+  reconnectNow: () => void
+  /**
+   * Slice 5 (task 6.5): passthrough to the demo-only connection-severing
+   * primitive. The METHOD is unconditionally available (tests exercise it);
+   * the UI CONTROL that calls it is gated on `import.meta.env.DEV` by the
+   * rendering component, so production bundles carry no such control.
+   */
+  dropConnection: () => void
   /** Number of outbound commands still awaiting ack/error. */
   pendingCount: () => number
 }
@@ -121,7 +141,12 @@ export function useChatSocket(
       // Every event arriving on this connection is associated with this hook's
       // `userId` — the identity validated at the handshake — and routed on.
       onEvent: (event) => dispatchRealtimeEvent(handlersRef.current, event),
-      onStateChange: setConnectionState,
+      onStateChange: (state) => {
+        // Mirror for `connectionState` first, then pass the transition on in
+        // arrival order — consumers see every state, not just the last one.
+        setConnectionState(state)
+        handlersRef.current.onStateChange?.(state)
+      },
       // Parse/transport errors are non-fatal (the socket reconnects on its
       // own); log for now, richer surfacing can land with 6.4–6.6.
       onError: (error) => {
@@ -140,7 +165,15 @@ export function useChatSocket(
     socketRef.current?.sendMessage(command)
   }, [])
 
+  const reconnectNow = useCallback(() => {
+    socketRef.current?.reconnectNow()
+  }, [])
+
+  const dropConnection = useCallback(() => {
+    socketRef.current?.dropConnection()
+  }, [])
+
   const pendingCount = useCallback(() => socketRef.current?.pendingCount() ?? 0, [])
 
-  return { connectionState, sendMessage, pendingCount }
+  return { connectionState, sendMessage, reconnectNow, dropConnection, pendingCount }
 }

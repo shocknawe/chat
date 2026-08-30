@@ -46,6 +46,12 @@ const MAX_COMPOSER_HEIGHT_PX = 132
 interface ComposerProps {
   /** Announces which conversation the message goes to (screen readers). */
   ariaLabel: string
+  /**
+   * Slice 5 (task 6.3): true while realtime messaging is unavailable. The
+   * composer REMAINS USABLE (spec) but its copy changes to say what happens
+   * to a draft now — it waits for the connection instead of being lost.
+   */
+  waitingForConnection?: boolean
   onSubmit: (content: string) => void
   /**
    * Optional external handle to the textarea for programmatic focus —
@@ -56,7 +62,17 @@ interface ComposerProps {
   focusRef?: MutableRefObject<HTMLTextAreaElement | null>
 }
 
-export function Composer({ ariaLabel, onSubmit, focusRef }: ComposerProps) {
+/** Placeholder while the connection is down (waiting copy, per spec). */
+const WAITING_PLACEHOLDER = 'You can keep typing. Messages wait for the connection.'
+
+const DEFAULT_PLACEHOLDER = 'Write a message…'
+
+export function Composer({
+  ariaLabel,
+  waitingForConnection = false,
+  onSubmit,
+  focusRef,
+}: ComposerProps) {
   const [draft, setDraft] = useState('')
   const canSend = draft.trim() !== ''
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -102,7 +118,7 @@ export function Composer({ ariaLabel, onSubmit, focusRef }: ComposerProps) {
         ref={setTextareaRef}
         className="composer-input"
         aria-label={ariaLabel}
-        placeholder="Write a message…"
+        placeholder={waitingForConnection ? WAITING_PLACEHOLDER : DEFAULT_PLACEHOLDER}
         rows={1}
         maxLength={MAX_MESSAGE_LENGTH}
         value={draft}
