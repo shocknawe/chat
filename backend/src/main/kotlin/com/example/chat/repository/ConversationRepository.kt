@@ -3,6 +3,8 @@ package com.example.chat.repository
 import com.example.chat.domain.Conversation
 import org.springframework.data.jpa.repository.EntityGraph
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
 import java.util.UUID
 
 interface ConversationRepository : JpaRepository<Conversation, UUID> {
@@ -51,4 +53,28 @@ interface ConversationRepository : JpaRepository<Conversation, UUID> {
      * first.
      */
     fun findByPairKeyIsNull(): List<Conversation>
+
+    /**
+     * The id projection behind presence scoping (add-conversation-creation-
+     * presence-inspector task 5.2): every user who shares at least one
+     * conversation with [userId], excluding [userId] themself. One scalar
+     * projection, one round trip, no entities.
+     *
+     * Deliberately *not* an `@EntityGraph`+[findByParticipants_Id] reuse: the
+     * caller ([com.example.chat.ws.PresenceBroadcaster]) runs on a WebSocket
+     * thread with no transaction and `open-in-view` is `false`, so returning
+     * entities would hand it a lazily-initialised `participants` collection
+     * that throws `LazyInitializationException` on first touch. Projecting
+     * ids inside the [`com.example.chat.service.PresenceService`]'s read-only
+     * transaction makes that failure unrepresentable.
+     */
+    @Query(
+        """
+        select distinct p.id from Conversation c
+        join c.participants p
+        where exists (select q.id from c.participants q where q.id = :userId)
+          and p.id <> :userId
+        """,
+    )
+    fun findPartnerIds(@Param("userId") userId: UUID): List<UUID>
 }

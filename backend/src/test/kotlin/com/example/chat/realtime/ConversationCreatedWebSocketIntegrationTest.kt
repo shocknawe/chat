@@ -92,6 +92,46 @@ class ConversationCreatedWebSocketIntegrationTest {
     private fun poll(queue: LinkedBlockingQueue<String>) =
         queue.poll(5, TimeUnit.SECONDS) ?: fail<String>("no frame received within timeout")
 
+    private fun pollOrNull(queue: LinkedBlockingQueue<String>, timeoutMillis: Long): String? =
+        queue.poll(timeoutMillis, TimeUnit.MILLISECONDS)
+
+    /**
+     * Presence (add-conversation-creation-presence-inspector task 5.3) makes a
+     * `PRESENCE` snapshot every connection's first event, and a transition
+     * broadcast follows each peer's connect. These tests pin the
+     * `CONVERSATION_CREATED` rules, so they wait for the snapshot (it is
+     * delivered asynchronously on another executor and can therefore race any
+     * later frame the test asserts on) and then skip presence frames wherever
+     * one shows up.
+     */
+    private fun awaitInitialPresence(queue: LinkedBlockingQueue<String>) {
+        val first = objectMapper.readTree(poll(queue))
+        assertThat(first.get("type").asText())
+            .describedAs("a connection's first event is its presence snapshot")
+            .isEqualTo("PRESENCE")
+    }
+
+    private fun pollSkippingPresence(queue: LinkedBlockingQueue<String>): String {
+        while (true) {
+            val frame = poll(queue)
+            if (objectMapper.readTree(frame).get("type").asText() != "PRESENCE") return frame
+        }
+    }
+
+    /**
+     * Nothing but presence frames may arrive on [queue]: the `PRESENCE`
+     * snapshots/transitions are expected; a `CONVERSATION_CREATED` is not.
+     */
+    private fun assertNoConversationCreated(queue: LinkedBlockingQueue<String>, description: String) {
+        val deadline = System.currentTimeMillis() + 500
+        while (true) {
+            val frame = pollOrNull(queue, (deadline - System.currentTimeMillis()).coerceAtLeast(1)) ?: return
+            assertThat(objectMapper.readTree(frame).get("type").asText())
+                .describedAs(description)
+                .isNotEqualTo("CONVERSATION_CREATED")
+        }
+    }
+
     private fun createConversation(callerId: UUID, participantId: UUID) =
         restTemplate.exchange(
             "http://localhost:$port/api/conversations",
@@ -120,7 +160,8 @@ class ConversationCreatedWebSocketIntegrationTest {
             val createdConversationId = objectMapper.readTree(response.body).get("id").asText()
 
             for (danQueue in listOf(danQueue1, danQueue2)) {
-                val event = objectMapper.readTree(poll(danQueue))
+                awaitInitialPresence(danQueue)
+                val event = objectMapper.readTree(pollSkippingPresence(danQueue))
                 assertThat(event.get("type").asText()).isEqualTo("CONVERSATION_CREATED")
                 assertThat(event.get("conversation").get("id").asText()).isEqualTo(createdConversationId)
                 val participantIds = event.get("conversation").get("participants").map { it.get("id").asText() }
@@ -136,9 +177,8 @@ class ConversationCreatedWebSocketIntegrationTest {
             }
 
             // The creator already holds the REST response — no socket event.
-            assertThat(aliceQueue.poll(500, TimeUnit.MILLISECONDS))
-                .describedAs("the creator's connection must not receive CONVERSATION_CREATED")
-                .isNull()
+            // (Presence frames still flow on this connection, as on any other.)
+            assertNoConversationCreated(aliceQueue, "the creator's connection must not receive CONVERSATION_CREATED")
         } finally {
             aliceSession.close()
             danSession1.close()
@@ -155,15 +195,17 @@ class ConversationCreatedWebSocketIntegrationTest {
         // created, and therefore order-independent.
         val (bobSession, bobQueue) = connect(SeedData.BOB_ID)
         try {
+            awaitInitialPresence(aliceQueue)
+            awaitInitialPresence(bobQueue)
+
             val response = createConversation(SeedData.ALICE_ID, SeedData.BOB_ID)
             assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
 
-            assertThat(bobQueue.poll(500, TimeUnit.MILLISECONDS))
-                .describedAs("the already-existed answer must not emit CONVERSATION_CREATED again")
-                .isNull()
-            assertThat(aliceQueue.poll(500, TimeUnit.MILLISECONDS))
-                .describedAs("neither party receives an event for the existing conversation")
-                .isNull()
+            assertNoConversationCreated(
+                bobQueue,
+                "the already-existed answer must not emit CONVERSATION_CREATED again",
+            )
+            assertNoConversationCreated(aliceQueue, "neither party receives an event for the existing conversation")
         } finally {
             aliceSession.close()
             bobSession.close()

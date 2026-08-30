@@ -34,6 +34,7 @@ import {
   type InboundEvent,
   type MessageAckEvent,
   type NewMessageEvent,
+  type PresenceEvent,
   type SendMessageCommand,
 } from '../realtime'
 
@@ -52,6 +53,8 @@ export interface RealtimeEventHandlers {
   onRealtimeError?: (event: ErrorEvent) => void
   /** A new conversation this user participates in (task 3.9: rail update). */
   onConversationCreated?: (event: ConversationCreatedEvent) => void
+  /** A full online-partner snapshot (task 5.4: wholesale presence replace). */
+  onPresence?: (event: PresenceEvent) => void
 }
 
 export interface UseChatSocketResult {
@@ -81,6 +84,9 @@ function dispatchRealtimeEvent(handlers: RealtimeEventHandlers, event: InboundEv
       break
     case 'CONVERSATION_CREATED':
       handlers.onConversationCreated?.(event)
+      break
+    case 'PRESENCE':
+      handlers.onPresence?.(event)
       break
   }
 }

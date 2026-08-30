@@ -19,7 +19,9 @@ import org.springframework.web.socket.handler.TextWebSocketHandler
  * MessageCommandHandler -> MessageService -> PostgreSQL`").
  *
  * Registers/unregisters connections in the [ConnectionRegistry] and routes
- * every inbound text frame through [ProtocolParser]. A frame that fails to
+ * every inbound text frame through [ProtocolParser]. On connect it also
+ * arranges the connection's first event: its scoped presence snapshot
+ * ([PresenceBroadcaster.onSessionOpened], task 5.3). A frame that fails to
  * parse gets a correlation-free `ERROR{code=INVALID_COMMAND}` back on that
  * connection alone (spec: "Protocol errors are isolated to the offending
  * command") -- the connection itself is never closed for a bad frame.
@@ -29,6 +31,7 @@ class WebSocketConnectionHandler(
     private val connectionRegistry: ConnectionRegistry,
     private val protocolParser: ProtocolParser,
     private val messageCommandHandler: MessageCommandHandler,
+    private val presenceBroadcaster: PresenceBroadcaster,
 ) : TextWebSocketHandler() {
 
     private val log = LoggerFactory.getLogger(WebSocketConnectionHandler::class.java)
@@ -65,6 +68,14 @@ class WebSocketConnectionHandler(
         }
 
         val decorated = ConcurrentWebSocketSessionDecorator(session, SEND_TIME_LIMIT_MS, SEND_BUFFER_SIZE_LIMIT)
+        // Task 5.3: the connect snapshot is enqueued BEFORE the session is
+        // registered, so it is ahead of every task any later presence edge can
+        // enqueue for it, and the session is not yet a transition target
+        // (PresenceBroadcaster gates transition broadcasts on this same
+        // handshake). PresenceBroadcaster.onSessionOpened's class doc spells
+        // out the guarantee; the enqueue itself is the only thing that happens
+        // here -- it cannot block, and it cannot fail this connection.
+        presenceBroadcaster.onSessionOpened(user.id, decorated)
         connectionRegistry.register(user.id, decorated)
         log.debug("Registered WebSocket session {} for user {}", session.id, user.id)
     }

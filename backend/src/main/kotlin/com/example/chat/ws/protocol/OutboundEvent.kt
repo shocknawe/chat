@@ -27,12 +27,17 @@ import java.util.UUID
  * on `MessageAck` once that field exists). Exposure is **planned but not yet
  * implemented** — [MessageDto] does not yet declare the field (Slice 0 of
  * that change is contract/documentation only; adding the field is Slice 6).
+ *
+ * [Presence] is the one event that reuses no REST shape at all: online
+ * presence exists only in the live connection registry, and its payload is a
+ * bare list of user ids scoped per recipient.
  */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
 @JsonSubTypes(
     JsonSubTypes.Type(value = MessageAck::class, name = "MESSAGE_ACK"),
     JsonSubTypes.Type(value = NewMessage::class, name = "NEW_MESSAGE"),
     JsonSubTypes.Type(value = ConversationCreated::class, name = "CONVERSATION_CREATED"),
+    JsonSubTypes.Type(value = Presence::class, name = "PRESENCE"),
     JsonSubTypes.Type(value = ErrorEvent::class, name = "ERROR"),
 )
 sealed interface OutboundEvent
@@ -76,6 +81,36 @@ data class NewMessage(
  */
 data class ConversationCreated(
     val conversation: ConversationDto,
+) : OutboundEvent
+
+/**
+ * A complete replacement set of the online user identifiers scoped to *this*
+ * recipient -- only users who share at least one conversation with the
+ * recipient, and never the recipient themself (a user is not their own
+ * conversation partner). Scoping is a privacy boundary, not a payload
+ * optimization: presence is the one signal that would otherwise leak across
+ * conversations the recipient is not part of.
+ *
+ * Delivered twice, in exactly two situations (add-conversation-creation-
+ * presence-inspector design.md decision 4):
+ * - as the **first event on a newly established connection** (a connect
+ *   snapshot), and
+ * - on a **presence transition** to every connected user sharing a
+ *   conversation with the user whose state changed.
+ *
+ * [online] is always a complete snapshot, never a delta: the client replaces
+ * whatever online set it held wholesale. Wholesale replacement is only
+ * self-healing if snapshots arrive in the order they were computed, which the
+ * server guarantees by computing *and* enqueueing every presence broadcast on
+ * one single-threaded executor ([com.example.chat.ws.PresenceBroadcaster]) --
+ * that total order is why the payload needs no sequence number.
+ *
+ * Empty is meaningful and is always serialized (never omitted, despite the
+ * global `non_null` inclusion rule -- an empty list is non-null): it means
+ * "none of this recipient's conversation partners are online".
+ */
+data class Presence(
+    val online: List<UUID>,
 ) : OutboundEvent
 
 /**

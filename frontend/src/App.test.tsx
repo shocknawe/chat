@@ -92,7 +92,11 @@ async function renderSignedInOnConversation(): Promise<
     </QueryClientProvider>,
   );
   await user.click(await screen.findByRole("button", { name: "Alice" }));
-  await user.click(await screen.findByRole("button", { name: "Bob" }));
+  // The second "Bob" is the rail row (the identity screen is gone). Its
+  // accessible name carries the presence word since task 5.5 ("Bob Offline"
+  // until a PRESENCE frame says otherwise), so it is matched by prefix — the
+  // sign-in flow must not depend on the partner's current presence state.
+  await user.click(await screen.findByRole("button", { name: /^Bob\b/ }));
   return user;
 }
 
@@ -302,8 +306,10 @@ describe("compact-viewport rail overlay (task 2.6, spec: compact viewports use e
     await openRailOverlay(user);
 
     // The rail row for the Bob conversation (the identity screen's "Bob" is
-    // gone — we are already signed in as Alice).
-    await user.click(screen.getByRole("button", { name: "Bob" }));
+    // gone — we are already signed in as Alice). The row's accessible name
+    // carries the presence word (task 5.5); no PRESENCE has arrived yet, so
+    // the honest default reads "Offline".
+    await user.click(screen.getByRole("button", { name: "Bob Offline" }));
     await expectOverlayClosed();
   });
 });
@@ -564,7 +570,7 @@ describe("conversation creation dialog — success (task 3.7)", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
     // …the rail gained the conversation and it IS the selected one…
-    const carolRow = await screen.findByRole("button", { name: "Carol" });
+    const carolRow = await screen.findByRole("button", { name: "Carol Offline" });
     expect(carolRow).toHaveAttribute("aria-current", "true");
     // …focus moved to the new conversation's composer…
     expect(
@@ -603,7 +609,7 @@ describe("conversation creation dialog — failure (task 3.7)", () => {
     // …the rail is untouched (still only the Alice↔Bob pair, still selected)…
     const rail = screen.getByRole("navigation");
     expect(within(rail).queryByRole("button", { name: "Carol" })).toBeNull();
-    expect(within(rail).getByRole("button", { name: "Bob" })).toHaveAttribute(
+    expect(within(rail).getByRole("button", { name: "Bob Offline" })).toHaveAttribute(
       "aria-current",
       "true",
     );
@@ -683,11 +689,11 @@ describe("CONVERSATION_CREATED rail reconciliation (task 3.9)", () => {
     });
 
     // The rail lists the new conversation…
-    const carolRow = await screen.findByRole("button", { name: "Carol" });
+    const carolRow = await screen.findByRole("button", { name: "Carol Offline" });
     // …without a refetch (cache patch, per the spec's "without refetch")…
     expect(fetchConversationsSpy).toHaveBeenCalledTimes(1);
     // …and without changing the active conversation.
-    expect(screen.getByRole("button", { name: "Bob" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Bob Offline" })).toHaveAttribute(
       "aria-current",
       "true",
     );
@@ -709,8 +715,10 @@ describe("CONVERSATION_CREATED rail reconciliation (task 3.9)", () => {
       });
     });
 
-    await screen.findByRole("button", { name: "Carol" });
-    expect(screen.getAllByRole("button", { name: "Carol" })).toHaveLength(1);
+    await screen.findByRole("button", { name: "Carol Offline" });
+    expect(
+      screen.getAllByRole("button", { name: "Carol Offline" }),
+    ).toHaveLength(1);
   });
 });
 
@@ -884,5 +892,102 @@ describe("rail previews (tasks 4.2–4.6)", () => {
     expect(within(rail()).queryByRole("button", { name: "Carol" })).toBeNull();
     expect(within(rail()).getByText("Latest from Bob")).toBeInTheDocument();
     expect(fetchConversationsSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Slice 4 — presence (OpenSpec tasks 5.4–5.5, 5.9, spec `presence`). The
+ * wholesale-replacement rule lives at `SignedInShell` (the state's only
+ * owner), the word-plus-dot rendering in the rail rows, so this file is the
+ * integration seam, driving PRESENCE frames through the faked socket exactly
+ * as the suites above do.
+ */
+describe("presence (tasks 5.4–5.5, 5.9)", () => {
+  /** The `.presence` mark inside a rail row (dot + word). */
+  function presenceMark(row: HTMLElement): HTMLElement {
+    const mark = row.querySelector<HTMLElement>(".presence");
+    expect(mark).not.toBeNull();
+    return mark as HTMLElement;
+  }
+
+  beforeEach(() => {
+    vi.spyOn(api, "fetchUsers").mockResolvedValue(DIRECTORY);
+    vi.spyOn(api, "fetchMessages").mockResolvedValue([]);
+  });
+
+  it("the first event as a presence snapshot sets the initial online set, word plus dot (task 5.5)", async () => {
+    await renderSignedInOnConversation();
+
+    // Before any PRESENCE frame, the honest default is offline — in words.
+    const bobRow = within(rail()).getByRole("button", { name: "Bob Offline" });
+    const markBefore = presenceMark(bobRow);
+    expect(markBefore).toHaveAttribute("data-state", "offline");
+    expect(within(markBefore).getByText("Offline")).toBeInTheDocument();
+    // The word is the signal; the dot is decoration only.
+    expect(markBefore.querySelector(".presence-dot")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+
+    // A PRESENCE frame as the socket's first event establishes the set.
+    act(() => {
+      captured[0]!.options.onEvent?.({
+        type: "PRESENCE",
+        online: [USER_B.id],
+      });
+    });
+
+    const onlineRow = within(rail()).getByRole("button", { name: "Bob Online" });
+    const markAfter = presenceMark(onlineRow);
+    expect(markAfter).toHaveAttribute("data-state", "online");
+    expect(within(markAfter).getByText("Online")).toBeInTheDocument();
+    expect(markAfter.querySelector(".presence-dot")).not.toBeNull();
+    // The word vanished with the state — no stale "Offline" beside "Online".
+    expect(within(markAfter).queryByText("Offline")).not.toBeInTheDocument();
+  });
+
+  it("REPLACES the set wholesale: a partner absent from the new snapshot reads Offline, never merged (tasks 5.4/5.9)", async () => {
+    // Two partners so the replacement is observable in BOTH directions.
+    vi.spyOn(api, "fetchConversations").mockResolvedValue([
+      CONVERSATION,
+      CONVERSATION_WITH_C,
+    ]);
+    await renderSignedInOnConversation();
+
+    const socket = captured[0]!;
+    // First snapshot: Bob online, Carol not.
+    act(() => {
+      socket.options.onEvent?.({ type: "PRESENCE", online: [USER_B.id] });
+    });
+    expect(
+      await within(rail()).findByRole("button", { name: "Bob Online" }),
+    ).toBeInTheDocument();
+    expect(
+      within(rail()).getByRole("button", { name: "Carol Offline" }),
+    ).toBeInTheDocument();
+
+    // Second snapshot lists ONLY Carol. Were the client merging, Bob would
+    // stay online; wholesale replacement drops him AND brings Carol online.
+    act(() => {
+      socket.options.onEvent?.({ type: "PRESENCE", online: [USER_C.id] });
+    });
+
+    await waitFor(() =>
+      expect(
+        within(rail()).getByRole("button", { name: "Carol Online" }),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      within(rail()).getByRole("button", { name: "Bob Offline" }),
+    ).toBeInTheDocument();
+
+    // And the state travels one way only: an empty replacement set takes
+    // everyone offline (the backend always serialises the empty array).
+    act(() => {
+      socket.options.onEvent?.({ type: "PRESENCE", online: [] });
+    });
+    expect(
+      await within(rail()).findByRole("button", { name: "Carol Offline" }),
+    ).toBeInTheDocument();
   });
 });

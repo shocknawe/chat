@@ -413,19 +413,24 @@ paths:
                     - id: "6ec0bd7f-11c0-43da-975e-2a8ad9ebae0b"
                       displayName: "Bob"
             PRESENCE:
-              x-status: planned
               description: |
                 A user's **online iff &ge;1 open connection** presence, scoped to only
                 the users the recipient shares a conversation with (a privacy boundary,
                 not a payload optimization: presence would otherwise leak across
                 conversations the recipient is not part of). `online` is always the
                 **wholesale, full scoped set** — a complete replacement of whatever the
-                client previously held, never a delta and never merged. This is
-                deliberate: wholesale replacement is self-healing across a dropped or
-                out-of-order frame, at the cost of requiring the server to deliver
-                snapshots in the order they were computed (which it does — see
-                design.md decision 4). A newly opened connection receives its own
-                snapshot as the first event on that connection.
+                client previously held, never a delta and never merged, and it never
+                contains the recipient themself (a user is not their own conversation
+                partner). This is deliberate: wholesale replacement is self-healing
+                across a dropped frame, at the cost of requiring the server to deliver
+                snapshots in the order they were computed — which it guarantees by
+                computing and enqueueing every presence broadcast on one
+                single-threaded executor. An empty `online` array is meaningful and is
+                always serialised (never omitted): it means none of this recipient's
+                conversation partners is online. Delivered in exactly two situations:
+                as the **first event on a newly established connection**, and on a
+                **presence transition** to every connected user sharing a conversation
+                with the user whose state changed.
               schema:
                 type: object
                 required: [type, online]

@@ -22,5 +22,6 @@ export {
   type MessageAckEvent,
   type NewMessageEvent,
   type OutboundCommand,
+  type PresenceEvent,
   type SendMessageCommand,
 } from './protocol'

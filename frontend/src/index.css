@@ -882,7 +882,8 @@ body[data-theme='dark'] .rail {
   width: 100%;
   min-height: 58px;
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
+  /* Third `auto` column hosts the optional presence mark (task 5.5). */
+  grid-template-columns: 36px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
@@ -1396,7 +1397,11 @@ body[data-theme='dark'] .identity-tile {
   font-weight: 800;
 }
 
-/* ── Presence dots (design-system ready; Slice 4 renders them) ──────── */
+/* ── Presence (task 5.5): dot plus WORD, in both states ─────────────── */
+/* Status-Is-Text: the uppercase word is the state's carrier — for sighted
+   users and assistive technology alike — and the dot is colour behind the
+   word, never instead of it. The word is visible at every width: a status
+   that disappears on narrow viewports is colour-alone by another name. */
 
 .presence {
   display: inline-flex;
@@ -1422,6 +1427,10 @@ body[data-theme='dark'] .identity-tile {
 .presence[data-state='online'] .presence-dot {
   background: var(--ok);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent);
+}
+
+.presence-text {
+  flex: none;
 }
 
 /* ── Compact viewport: the rail becomes a slide-over drawer (task 2.6) ─ */

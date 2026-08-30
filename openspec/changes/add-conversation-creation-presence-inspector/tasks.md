@@ -57,18 +57,18 @@ is never cut (slices 2–4 depend on it to be demonstrable).
 
 ## 5. Slice 4 — Presence
 
-- [ ] 5.1 Detect the empty↔non-empty edge for a user *inside* the `sessionsByUser.compute*` lambda (covering `register`, `unregister`, and `evict`) by capturing before/after emptiness into a local. Perform **no** repository call, `send`, or `sendToUser` inside the lambda: `ConnectionRegistry.send` evicts on failure and `evict` re-enters `computeIfPresent` on the same map, which `ConcurrentHashMap` forbids (`IllegalStateException: Recursive update`, or a bin-lock deadlock across keys)
-- [ ] 5.1a Break the registry↔broadcaster constructor cycle explicitly: publish a presence-transition signal (`ApplicationEventPublisher`, or a listener injected via `ObjectProvider`/setter), so the broadcaster can call back into `registry.sendToUser` without a circular bean dependency
-- [ ] 5.1b Make `evict` resolve the owning user from the registry's own index rather than `session.attributes`, so a session can never be dropped from `sessionsById` while remaining in `sessionsByUser` — today an unresolvable identity leaves that user permanently online
-- [ ] 5.2 After `compute*` returns, and only if a transition was observed, resolve the scoped partner set and broadcast outside the lock. Compute it in a `@Transactional(readOnly = true)` `PresenceService` using a single id-projection query (`select distinct p.id from Conversation c join c.participants p where …`): `open-in-view` is `false` and transitions fire on a WebSocket thread with no transaction, so touching the lazy `participants` association there throws `LazyInitializationException`
-- [ ] 5.2a Dispatch every presence broadcast through one single-threaded executor, so snapshots are computed and enqueued in a total order — wholesale replacement is only self-healing if the newest snapshot is also the last one delivered
-- [ ] 5.3 Send a newly connected socket its scoped presence snapshot as its first event, enqueued on that same executor and ordered before the session becomes eligible for transition broadcasts
-- [ ] 5.4 Handle `PRESENCE` in the frontend: replace the online set wholesale, never merge
-- [ ] 5.5 Render presence on rail rows as dot plus word (never colour alone)
-- [ ] 5.6 Integration test: a user holding two connections is not announced offline when one closes, and is announced offline when the last closes
-- [ ] 5.7 Test: a connection removed by delivery failure changes that user's announced presence, and the eviction triggered inside a presence broadcast does not deadlock or throw
-- [ ] 5.8 Test: a delivered presence set contains no user sharing no conversation with the recipient
-- [ ] 5.9 Frontend test: presence snapshot replacement rather than merge
+- [x] 5.1 Detect the empty↔non-empty edge for a user *inside* the `sessionsByUser.compute*` lambda (covering `register`, `unregister`, and `evict`) by capturing before/after emptiness into a local. Perform **no** repository call, `send`, or `sendToUser` inside the lambda: `ConnectionRegistry.send` evicts on failure and `evict` re-enters `computeIfPresent` on the same map, which `ConcurrentHashMap` forbids (`IllegalStateException: Recursive update`, or a bin-lock deadlock across keys)
+- [x] 5.1a Break the registry↔broadcaster constructor cycle explicitly: publish a presence-transition signal (`ApplicationEventPublisher`, or a listener injected via `ObjectProvider`/setter), so the broadcaster can call back into `registry.sendToUser` without a circular bean dependency
+- [x] 5.1b Make `evict` resolve the owning user from the registry's own index rather than `session.attributes`, so a session can never be dropped from `sessionsById` while remaining in `sessionsByUser` — today an unresolvable identity leaves that user permanently online
+- [x] 5.2 After `compute*` returns, and only if a transition was observed, resolve the scoped partner set and broadcast outside the lock. Compute it in a `@Transactional(readOnly = true)` `PresenceService` using a single id-projection query (`select distinct p.id from Conversation c join c.participants p where …`): `open-in-view` is `false` and transitions fire on a WebSocket thread with no transaction, so touching the lazy `participants` association there throws `LazyInitializationException`
+- [x] 5.2a Dispatch every presence broadcast through one single-threaded executor, so snapshots are computed and enqueued in a total order — wholesale replacement is only self-healing if the newest snapshot is also the last one delivered
+- [x] 5.3 Send a newly connected socket its scoped presence snapshot as its first event, enqueued on that same executor and ordered before the session becomes eligible for transition broadcasts
+- [x] 5.4 Handle `PRESENCE` in the frontend: replace the online set wholesale, never merge
+- [x] 5.5 Render presence on rail rows as dot plus word (never colour alone)
+- [x] 5.6 Integration test: a user holding two connections is not announced offline when one closes, and is announced offline when the last closes
+- [x] 5.7 Test: a connection removed by delivery failure changes that user's announced presence, and the eviction triggered inside a presence broadcast does not deadlock or throw
+- [x] 5.8 Test: a delivered presence set contains no user sharing no conversation with the recipient
+- [x] 5.9 Frontend test: presence snapshot replacement rather than merge
 
 ## 6. Slice 5 — Connection state
 

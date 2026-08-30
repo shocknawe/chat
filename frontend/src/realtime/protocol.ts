@@ -9,6 +9,7 @@
  *   server -> client: MESSAGE_ACK { clientMessageId, message }
  *                     NEW_MESSAGE { message }
  *                     ERROR { clientMessageId?, code, reason }
+ *                     PRESENCE { online: uuid[] }
  *
  * Server-authoritative messages (design.md): `clientMessageId` is only a
  * correlation/idempotency token; the `message` payload carried by MESSAGE_ACK
@@ -71,8 +72,27 @@ export interface ConversationCreatedEvent {
   conversation: Conversation
 }
 
+/**
+ * Sent as a socket's FIRST event after the handshake (its current snapshot),
+ * and again on every online/offline transition of one of the recipient's
+ * conversation partners. `online` is the WHOLESALE, full scoped set of online
+ * user ids — a complete replacement of whatever the client held before, never
+ * a delta and never merged, and never containing the recipient themself. The
+ * empty array is meaningful and always serialised: none of the recipient's
+ * conversation partners is online.
+ */
+export interface PresenceEvent {
+  type: 'PRESENCE'
+  online: string[]
+}
+
 /** Union of every event the server can send. */
-export type InboundEvent = MessageAckEvent | NewMessageEvent | ErrorEvent | ConversationCreatedEvent
+export type InboundEvent =
+  | MessageAckEvent
+  | NewMessageEvent
+  | ErrorEvent
+  | ConversationCreatedEvent
+  | PresenceEvent
 
 /**
  * Stable, machine-readable ERROR codes (mirror of the backend `ErrorCodes`
@@ -214,6 +234,15 @@ export function parseInboundEvent(raw: string): InboundEvent | null {
             ? conversation
             : { ...conversation, lastMessage },
       }
+      return event
+    }
+    case 'PRESENCE': {
+      // The empty array IS valid (a fully offline partner set) and required —
+      // the backend always serialises it, so a missing `online` is malformed.
+      if (!Array.isArray(json.online) || !json.online.every((id) => typeof id === 'string')) {
+        return null
+      }
+      const event: PresenceEvent = { type: 'PRESENCE', online: json.online }
       return event
     }
     default:

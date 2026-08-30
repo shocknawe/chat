@@ -24,6 +24,15 @@ import { initials } from '../initials'
  * a message-length name — the full content is one activation away in the
  * thread, which states the empty-history case itself.
  *
+ * Presence (tasks 5.4–5.5): each row's OTHER participant's online state is
+ * rendered as a dot PLUS A WORD ("Online"/"Offline") — Status-Is-Text: the
+ * word carries the signal for everyone including assistive technology (it is
+ * part of the row's accessible name), and the dot is colour reinforcement
+ * only, marked `aria-hidden`. The word appears in BOTH states: a state that
+ * vanishes when it goes offline is colour-alone by another name. With more
+ * than one other participant (group conversations, not built yet) presence is
+ * omitted rather than guessed at for a crowd; with none, likewise.
+ *
  * Every state is announced in words (DESIGN.md, Status-Is-Text): a text
  * status line + skeleton tiles while loading, `role="alert"` with retry on
  * failure, and an explicit empty note when the user has no conversations.
@@ -57,6 +66,13 @@ interface ConversationListProps {
    * override. Same store the thread pane renders its bubbles from.
    */
   pendingMessages: PendingMessage[]
+  /**
+   * The current WHOLESALE online-partner snapshot (task 5.4), owned by
+   * `SignedInShell` and replaced — never merged — on every PRESENCE event.
+   * Empty until the socket's first snapshot arrives, so rows read "Offline"
+   * until the backend says otherwise.
+   */
+  onlineUserIds?: ReadonlySet<string>
   selectedId: string | null
   onSelect: (conversationId: string) => void
   /** True while the viewport is below the compact breakpoint (task 2.6). */
@@ -82,6 +98,7 @@ export function ConversationList({
   error,
   onRetry,
   pendingMessages,
+  onlineUserIds,
   selectedId,
   onSelect,
   isCompact = false,
@@ -166,6 +183,13 @@ export function ConversationList({
           {conversations.map((conversation) => {
             const label = conversationLabel(conversation, currentUserId)
             const isActive = conversation.id === selectedId
+            // Task 5.5: presence is derivable only when the row has exactly one
+            // other participant — with more than one, no single word is honest,
+            // so none is rendered (see the module header).
+            const otherParticipants = conversation.participants.filter((p) => p.id !== currentUserId)
+            const soleOther = otherParticipants.length === 1 ? otherParticipants[0] : undefined
+            const other = soleOther ?? null
+            const isOnline = other !== null && (onlineUserIds?.has(other.id) ?? false)
             return (
               <li key={conversation.id}>
                 <button
@@ -187,6 +211,20 @@ export function ConversationList({
                       {conversationPreview(conversation, pendingMessages)}
                     </span>
                   </span>
+                  {' '}
+                  {/* Task 5.5: dot plus WORD, in both states. The word is the
+                      signal (and part of the row's accessible name — the
+                      explicit whitespace text node is what separates it from
+                      the label in the computed name; whitespace-only runs
+                      create no anonymous grid item); the dot is decoration
+                      only, `aria-hidden`. Mirrors the one-shot reference's
+                      `.presence[data-state]` markup. */}
+                  {other !== null && (
+                    <span className="presence" data-state={isOnline ? 'online' : 'offline'}>
+                      <span className="presence-dot" aria-hidden="true" />
+                      <span className="presence-text">{isOnline ? 'Online' : 'Offline'}</span>
+                    </span>
+                  )}
                 </button>
               </li>
             )

@@ -28,6 +28,7 @@ import type {
   ErrorEvent,
   MessageAckEvent,
   NewMessageEvent,
+  PresenceEvent,
 } from './realtime'
 
 /**
@@ -105,6 +106,15 @@ interface SignedInShellProps {
   onSwitchUser: () => void
   announce: (message: string) => void
 }
+
+/**
+ * Presence starts EMPTY: before the socket's first PRESENCE snapshot arrives
+ * (the backend sends it as the connection's first event) no partner is known
+ * to be online, so "Offline" is the honest default — the rail renders it in
+ * words from the very first paint. Frozen to keep the initial state
+ * referentially stable across renders.
+ */
+const INITIAL_ONLINE_USER_IDS: ReadonlySet<string> = new Set()
 
 /**
  * Every overlay the shell can present, exclusively one at a time (task 2.6
@@ -346,6 +356,22 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
     [user.id],
   )
 
+  /**
+   * Slice 4 (task 5.4): the online-partner set, REPLACED WHOLESALE by every
+   * PRESENCE event. The backend contracts each frame as the full scoped set
+   * of online conversation partners — never a delta — so the only correct
+   * application is `new Set(event.online)`: nothing from the previous set
+   * survives an event that no longer lists it (a user who went offline is
+   * simply absent from the next snapshot, and no merge would notice).
+   * Freshness-by-ordering holds because the backend computes and enqueues
+   * every snapshot on one single-threaded executor, so the last event to
+   * arrive is the most recently computed one.
+   */
+  const [onlineUserIds, setOnlineUserIds] = useState<ReadonlySet<string>>(INITIAL_ONLINE_USER_IDS)
+  const handlePresence = useCallback((event: PresenceEvent) => {
+    setOnlineUserIds(new Set(event.online))
+  }, [])
+
   // Realtime connection (task 6.2): the socket lifecycle is bound to this
   // identity — created once `currentUser` is established (this shell only
   // renders then) and terminated on user switch/unmount. `sendMessage` is
@@ -357,6 +383,7 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
     onNewMessage: handleNewMessage,
     onRealtimeError: handleRealtimeError,
     onConversationCreated: handleConversationCreated,
+    onPresence: handlePresence,
   })
 
   /**
@@ -616,6 +643,7 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
           error={conversationsQuery.error}
           onRetry={() => void conversationsQuery.refetch()}
           pendingMessages={pendingMessages}
+          onlineUserIds={onlineUserIds}
           selectedId={selectedConversationId}
           onSelect={handleSelectConversation}
           isCompact={isCompact}

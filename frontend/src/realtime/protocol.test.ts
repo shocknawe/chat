@@ -144,6 +144,33 @@ describe('parseInboundEvent — ERROR', () => {
   })
 })
 
+describe('parseInboundEvent — PRESENCE', () => {
+  it('parses a valid frame with ids', () => {
+    const raw = JSON.stringify({ type: 'PRESENCE', online: ['user-1', 'user-2'] })
+    expect(parseInboundEvent(raw)).toEqual({ type: 'PRESENCE', online: ['user-1', 'user-2'] })
+  })
+
+  it('parses the always-serialised empty array (a fully offline partner set)', () => {
+    const raw = JSON.stringify({ type: 'PRESENCE', online: [] })
+    expect(parseInboundEvent(raw)).toEqual({ type: 'PRESENCE', online: [] })
+  })
+
+  it('rejects a missing online field — absence is not an empty set', () => {
+    const raw = JSON.stringify({ type: 'PRESENCE' })
+    expect(parseInboundEvent(raw)).toBeNull()
+  })
+
+  it('rejects a wrongly-typed online field', () => {
+    const raw = JSON.stringify({ type: 'PRESENCE', online: 'user-1' })
+    expect(parseInboundEvent(raw)).toBeNull()
+  })
+
+  it('rejects a set containing a non-string entry', () => {
+    const raw = JSON.stringify({ type: 'PRESENCE', online: ['user-1', 42] })
+    expect(parseInboundEvent(raw)).toBeNull()
+  })
+})
+
 describe('parseInboundEvent — malformed/unknown frames', () => {
   it('returns null for invalid JSON', () => {
     expect(parseInboundEvent('{not json')).toBeNull()
