@@ -59,7 +59,7 @@
 
 ## 8. End-to-end verification
 
-- [ ] 8.1 Run the full demo: `docker compose up`, two ordinary browser windows, two users, open the shared conversation, send a message, confirm it persists and appears exactly once in real time for both.
-- [ ] 8.2 Verify reload retains history, reconnect recovers missed messages, and multiple sessions of the same user each receive realtime events.
+- [x] 8.1 Run the full demo: `docker compose up`, two ordinary browser windows, two users, open the shared conversation, send a message, confirm it persists and appears exactly once in real time for both. — verified manually.
+- [x] 8.2 Verify reload retains history, reconnect recovers missed messages, and multiple sessions of the same user each receive realtime events. — verified manually.
 - [ ] 8.3 Verify identity/authorization/validation edge cases: window selections stay independent, unknown and non-participant users are rejected, empty messages are blocked, and unsupported commands return a protocol error without dropping other connections.
 - [ ] 8.4 Verify duplicate command behavior: identical retry returns the existing message, conflicting token reuse errors, and no duplicate row or message bubble appears.
