@@ -21,12 +21,26 @@ import { compareMessages } from '../messageOrder'
  * fractional seconds), so render order and the task-6.4 cache upsert order
  * can never disagree.
  *
- * Scroll: the thread is anchored to the bottom (DESIGN.md). The scroll effect
- * fires on conversation change and on the message count arriving — with no
- * realtime appends yet, that is exactly "scroll to the latest on history
- * load". It uses instant positioning rather than animated scrolling, so it
- * cannot fight the reader or surprise anyone under reduced motion.
+ * Scroll: the thread is anchored to the bottom (DESIGN.md), but realtime
+ * appends (task 6.5) must not yank a reader who scrolled up in the history.
+ * The scroll effect distinguishes the cases:
+ *
+ * - Conversation switch or first data arrival: unconditional snap to the
+ *   latest message — an initial load owns the viewport.
+ * - The reader's own pending append: unconditional — a just-sent message
+ *   should snap into view.
+ * - Any other append (realtime NEW_MESSAGE): scroll only if the reader was
+ *   already within ~100px of the bottom BEFORE the content grew. A
+ *   scrolled-up reader keeps their place; a stronger "new messages"
+ *   affordance is WP8 visual-design territory, so this is intentionally
+ *   the simple near-bottom rule.
+ *
+ * Positioning is instant rather than animated, so it cannot fight the reader
+ * or surprise anyone under reduced motion.
  */
+
+/** Distance from the bottom (px) within which a realtime append still auto-scrolls. */
+const NEAR_BOTTOM_THRESHOLD_PX = 100
 
 /** Consecutive messages from one sender, in arrival order. */
 interface MessageGroup {
@@ -87,16 +101,49 @@ export function ThreadPane({ currentUser, conversation, pendingMessages, onSendM
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const messageCount = messages?.length
+  const conversationId = conversation?.id
+  const pendingCount = threadPending.length
 
-  // Bottom anchor: on conversation change, on data arrival, and whenever a
-  // pending item is appended (a just-sent message should snap into view too).
-  // The effect runs after the DOM commit, so scrollHeight includes the new list.
+  // Bottom-anchor tracking. `nearBottomRef` is maintained by the scroll
+  // handler, so the append effect below knows where the reader was BEFORE the
+  // arriving message grew the list — computing the distance inside the effect
+  // itself would already include the new content's height.
+  const nearBottomRef = useRef(true)
+  const prevConversationIdRef = useRef<string | undefined>(undefined)
+  const prevPendingCountRef = useRef(0)
+
+  const handleScroll = () => {
+    const region = scrollRef.current
+    if (region !== null) {
+      nearBottomRef.current =
+        region.scrollHeight - region.scrollTop - region.clientHeight < NEAR_BOTTOM_THRESHOLD_PX
+    }
+  }
+
+  // Bottom anchor. Runs after the DOM commit, so scrollHeight includes the
+  // newly rendered list. See the module header for the per-case policy.
   useEffect(() => {
     const region = scrollRef.current
-    if (region !== null && (messageCount !== undefined || threadPending.length > 0)) {
+    const conversationChanged = prevConversationIdRef.current !== conversationId
+    prevConversationIdRef.current = conversationId
+    const ownPendingAppended = pendingCount > prevPendingCountRef.current
+    prevPendingCountRef.current = pendingCount
+
+    // A switch re-anchors the thread: reset near-bottom so the first data
+    // arrival on the new conversation snaps like an initial load even if the
+    // reader had scrolled up in the previous one.
+    if (conversationChanged) {
+      nearBottomRef.current = true
+    }
+
+    if (
+      region !== null &&
+      (messageCount !== undefined || pendingCount > 0) &&
+      (conversationChanged || ownPendingAppended || nearBottomRef.current)
+    ) {
       region.scrollTop = region.scrollHeight
     }
-  }, [conversation?.id, messageCount, threadPending.length])
+  }, [conversationId, messageCount, pendingCount])
 
   const resolveSender = (senderId: string): string =>
     conversation?.participants.find((p) => p.id === senderId)?.displayName ?? 'Someone'
@@ -121,7 +168,7 @@ export function ThreadPane({ currentUser, conversation, pendingMessages, onSendM
           {conversationLabel(conversation, currentUser.id)}
         </h1>
       </header>
-      <div className="thread-scroll" ref={scrollRef}>
+      <div className="thread-scroll" ref={scrollRef} onScroll={handleScroll}>
         {messagesQuery.isPending && (
           <div className="thread-region">
             <p role="status" className="meta thread-status">

@@ -16,7 +16,7 @@ import { useChatSocket } from './hooks/useChatSocket'
 import { usePendingMessages } from './hooks/usePendingMessages'
 import { initials } from './initials'
 import { upsertAuthoritativeMessage } from './messagesCache'
-import type { ErrorEvent, MessageAckEvent } from './realtime'
+import type { ErrorEvent, MessageAckEvent, NewMessageEvent } from './realtime'
 
 /**
  * Root component: establishes the window-scoped current user before any
@@ -146,14 +146,45 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
     [markPendingFailed],
   )
 
+  /**
+   * Task 6.5 realtime receipt. ONE keyed upsert covers both cases in the
+   * requirement, with zero refresh and zero selection change:
+   * - Active conversation: the open messages query re-renders instantly.
+   * - Inactive conversation: the per-conversation cache entry is keyed
+   *   `['messages', userId, conversationId]` and lives independently of what
+   *   is on screen, so the message seeds that conversation's history for a
+   *   later visit without touching the active conversation.
+   *
+   * Exactly-once across delivery paths: the backend fans NEW_MESSAGE out to
+   * every participant connection, including the SENDER'S own other sessions —
+   * and this session may already hold the same message via an ACK (6.4) or a
+   * history fetch. `upsertAuthoritativeMessage` is keyed on the server id and
+   * replaces in place, so a late or duplicate NEW_MESSAGE with an id already
+   * cached can never produce a second rendered bubble.
+   *
+   * No conversations-rail invalidation — deliberately: the `Conversation`
+   * DTO is `{ id, participants }` only, and the rail renders nothing derived
+   * from messages (no last-message preview, no unread count). Invalidating
+   * `['conversations', user.id]` here would refetch byte-identical data and
+   * steal nothing; if the DTO ever gains message-derived fields, this is the
+   * place to add the invalidation.
+   */
+  const handleNewMessage = useCallback(
+    (event: NewMessageEvent) => {
+      upsertAuthoritativeMessage(user.id, event.message)
+    },
+    [user.id],
+  )
+
   // Realtime connection (task 6.2): the socket lifecycle is bound to this
   // identity — created once `currentUser` is established (this shell only
   // renders then) and terminated on user switch/unmount. `sendMessage` is
-  // consumed by the submit path below, the ack/error handlers are 6.4 (wired
-  // here), `onNewMessage` remains unwired until 6.5, and `connectionState`
-  // feeds the availability indicator in 6.6.
+  // consumed by the submit path below, the ack/error handlers are 6.4, the
+  // new-message handler is 6.5 (all wired here), and `connectionState` feeds
+  // the availability indicator in 6.6.
   const { sendMessage } = useChatSocket(user.id, {
     onMessageAck: handleMessageAck,
+    onNewMessage: handleNewMessage,
     onRealtimeError: handleRealtimeError,
   })
 
