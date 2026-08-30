@@ -258,11 +258,12 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
    * reports exactly one connected transition (socket A is terminated before
    * it can open), which the ref correctly classifies as the initial connect.
    *
-   * Merge safety: a refetch response could, in principle, land after a
-   * WebSocket upsert for a newer message and momentarily drop it; task 6.7
-   * makes the history merge safe against exactly that race. This invalidation
-   * is the spec's recovery mechanism and lands now — the merge hardening is
-   * 6.7's job, deliberately not duplicated here.
+   * Merge safety: this refetch commits through the task-6.7 history merge
+   * (`fetchMergedHistory` → `mergeHistoryWithCache`), which unions the
+   * response with any realtime upserts that landed while the request was in
+   * flight — a newer WebSocket message can be neither erased nor duplicated
+   * by the commit. This invalidation is the spec's recovery mechanism; the
+   * merge is what makes it safe.
    */
   const hasConnectedRef = useRef(false)
   const prevConnectionStateRef = useRef<ConnectionState>(connectionState)

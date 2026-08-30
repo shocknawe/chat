@@ -49,7 +49,7 @@
 - [x] 6.4 Implement a single authoritative-message upsert path keyed by server message id; on `MESSAGE_ACK`, replace the correlated pending item, and on `ERROR`, mark it failed.
 - [x] 6.5 On `NEW_MESSAGE`, upsert into the active conversation without refresh; for other conversations update or invalidate the relevant cache without changing the active conversation.
 - [x] 6.6 On unexpected disconnect, reconnect with backoff, surface a "realtime temporarily unavailable" indicator, retry unacknowledged commands with the same `clientMessageId`, and refresh history after reconnect.
-- [ ] 6.7 Merge REST history with realtime cache updates so an in-flight history response cannot duplicate or erase a newer WebSocket message.
+- [x] 6.7 Merge REST history with realtime cache updates so an in-flight history response cannot duplicate or erase a newer WebSocket message.
 
 ## 7. Automated verification
 

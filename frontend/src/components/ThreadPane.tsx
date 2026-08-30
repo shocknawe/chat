@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchMessages, type Conversation, type Message, type User } from '../api'
+import { type Conversation, type Message, type User } from '../api'
 import { conversationLabel } from './ConversationList'
 import { Composer } from './Composer'
 import type { PendingMessage } from '../hooks/usePendingMessages'
 import { initials } from '../initials'
 import { compareMessages } from '../messageOrder'
+import { fetchMergedHistory } from '../messagesCache'
 
 /**
  * Thread pane (task 5.3) — the selected conversation's message history.
@@ -80,9 +81,16 @@ interface ThreadPaneProps {
 }
 
 export function ThreadPane({ currentUser, conversation, pendingMessages, onSendMessage }: ThreadPaneProps) {
+  // Task 6.7: history lands through the REST↔realtime MERGE, not a blind
+  // overwrite. `fetchMergedHistory` unions the response with whatever ack /
+  // NEW_MESSAGE upserts landed in this cache entry while the fetch was in
+  // flight, so a mid-flight realtime message is neither erased by the commit
+  // nor duplicated. Dedupe/ordering invariants live in
+  // `mergeHistoryWithCache`; the `useMemo` sort below stays as the final
+  // render guard.
   const messagesQuery = useQuery({
     queryKey: ['messages', currentUser.id, conversation?.id ?? ''],
-    queryFn: () => fetchMessages(currentUser.id, conversation?.id ?? ''),
+    queryFn: () => fetchMergedHistory(currentUser.id, conversation?.id ?? ''),
     enabled: conversation !== null,
   })
 
