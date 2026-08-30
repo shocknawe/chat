@@ -1,8 +1,7 @@
 package com.example.chat.ws.protocol
 
 import com.example.chat.api.dto.MessageDto
-import com.fasterxml.jackson.databind.json.JsonMapper
-import com.fasterxml.jackson.module.kotlin.kotlinModule
+import com.example.chat.testsupport.TestObjectMappers
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -14,17 +13,13 @@ import java.util.UUID
  * protocol's Jackson (de)serialization and [ProtocolParser]'s degrade-to-
  * `Invalid`-rather-than-throw behavior for malformed/unsupported commands.
  *
- * Uses a hand-built [JsonMapper] configured the same way the application's
- * shared bean is (Kotlin module + `fail-on-unknown-properties: false`) so
- * this test has no Spring dependency at all.
+ * Uses [TestObjectMappers.create], a hand-built mapper mirroring every
+ * `spring.jackson.*` setting in application.yml, so this test has no Spring
+ * dependency at all.
  */
 class ProtocolParserTest {
 
-    private val objectMapper = JsonMapper.builder()
-        .addModule(kotlinModule())
-        .findAndAddModules()
-        .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-        .build()
+    private val objectMapper = TestObjectMappers.create()
 
     private val parser = ProtocolParser(objectMapper)
 
@@ -145,5 +140,41 @@ class ProtocolParserTest {
 
         assertThat(tree.get("type").asText()).isEqualTo("ERROR")
         assertThat(tree.get("code").asText()).isEqualTo(ErrorCodes.INVALID_COMMAND)
+        assertThat(tree.has("clientMessageId")).isFalse()
+    }
+
+    // --- Every stable error code must serialize verbatim -- the frontend
+    //     branches on these strings, so renaming one is a protocol break. ---
+
+    @Test
+    fun `every stable error code serializes verbatim on the wire`() {
+        val stableCodes = listOf(
+            ErrorCodes.INVALID_COMMAND,
+            ErrorCodes.INVALID_CONTENT,
+            ErrorCodes.CONVERSATION_NOT_FOUND,
+            ErrorCodes.FORBIDDEN,
+            ErrorCodes.CLIENT_MESSAGE_ID_CONFLICT,
+            ErrorCodes.PERSISTENCE_ERROR,
+        )
+
+        stableCodes.forEach { code ->
+            val json = objectMapper.writeValueAsString(
+                ErrorEvent(clientMessageId = UUID.randomUUID(), code = code, reason = "test"),
+            )
+            assertThat(objectMapper.readTree(json).get("code").asText()).isEqualTo(code)
+        }
+    }
+
+    @Test
+    fun `an ERROR event for a rejected command carries the correlating clientMessageId`() {
+        val clientMessageId = UUID.randomUUID()
+        val event: OutboundEvent =
+            ErrorEvent(clientMessageId = clientMessageId, code = ErrorCodes.INVALID_CONTENT, reason = "too long")
+
+        val tree = objectMapper.readTree(objectMapper.writeValueAsString(event))
+
+        assertThat(tree.get("type").asText()).isEqualTo("ERROR")
+        assertThat(tree.get("clientMessageId").asText()).isEqualTo(clientMessageId.toString())
+        assertThat(tree.get("code").asText()).isEqualTo(ErrorCodes.INVALID_CONTENT)
     }
 }

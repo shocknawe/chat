@@ -74,4 +74,70 @@ class MessageServiceUnitTest {
         assertThat(result).isInstanceOf(SendResult.Rejected::class.java)
         assertThat((result as SendResult.Rejected).code).isEqualTo(ErrorCodes.CONVERSATION_NOT_FOUND)
     }
+
+    // --- Astral-plane (non-BMP) boundary: the limit counts *code points*,
+    //     matching Postgres `varchar(n)`, never UTF-16 `String.length` ---
+
+    @Test
+    fun `astral content at exactly the maximum code points is accepted despite double the UTF-16 length`() {
+        // U+1F600 is one code point but TWO UTF-16 code units (surrogate
+        // pair): this string has codePointCount == max but length == 2 * max.
+        // A `String.length`-based check would wrongly reject it -- this test
+        // pins the code-point counting fix.
+        val command = SendMessageCommand(UUID.randomUUID(), UUID.randomUUID(), "😀".repeat(4000))
+        org.mockito.Mockito.`when`(messageRepository.findBySender_IdAndClientMessageId(senderId, command.clientMessageId))
+            .thenReturn(null)
+        org.mockito.Mockito.`when`(messageWriter.createAndCommit(senderId, command))
+            .thenReturn(WriteResult.ConversationNotFound)
+
+        val result = service(maxContentLength = 4000).send(senderId, command)
+
+        // Reached the writer (not rejected for length): CONVERSATION_NOT_FOUND
+        // proves validation let it through to the persistence stage.
+        assertThat(result).isInstanceOf(SendResult.Rejected::class.java)
+        assertThat((result as SendResult.Rejected).code).isEqualTo(ErrorCodes.CONVERSATION_NOT_FOUND)
+    }
+
+    @Test
+    fun `astral content one code point over the maximum is rejected before persisting`() {
+        val command = SendMessageCommand(UUID.randomUUID(), UUID.randomUUID(), "😀".repeat(4001))
+
+        val result = service(maxContentLength = 4000).send(senderId, command)
+
+        assertThat(result).isInstanceOf(SendResult.Rejected::class.java)
+        assertThat((result as SendResult.Rejected).code).isEqualTo(ErrorCodes.INVALID_CONTENT)
+        verifyNoInteractions(messageWriter)
+    }
+
+    // --- Authorization outcomes: the writer's authorization verdicts are
+    //     mapped to the stable protocol error codes (CONVERSATION_NOT_FOUND
+    //     for a missing conversation, FORBIDDEN for a non-participant) ---
+
+    @Test
+    fun `a non-participant sender is rejected as FORBIDDEN`() {
+        val command = SendMessageCommand(UUID.randomUUID(), UUID.randomUUID(), "hello")
+        org.mockito.Mockito.`when`(messageRepository.findBySender_IdAndClientMessageId(senderId, command.clientMessageId))
+            .thenReturn(null)
+        org.mockito.Mockito.`when`(messageWriter.createAndCommit(senderId, command))
+            .thenReturn(WriteResult.NotParticipant)
+
+        val result = service().send(senderId, command)
+
+        assertThat(result).isInstanceOf(SendResult.Rejected::class.java)
+        assertThat((result as SendResult.Rejected).code).isEqualTo(ErrorCodes.FORBIDDEN)
+    }
+
+    @Test
+    fun `a referenced conversation that does not exist is rejected as CONVERSATION_NOT_FOUND`() {
+        val command = SendMessageCommand(UUID.randomUUID(), UUID.randomUUID(), "hello")
+        org.mockito.Mockito.`when`(messageRepository.findBySender_IdAndClientMessageId(senderId, command.clientMessageId))
+            .thenReturn(null)
+        org.mockito.Mockito.`when`(messageWriter.createAndCommit(senderId, command))
+            .thenReturn(WriteResult.ConversationNotFound)
+
+        val result = service().send(senderId, command)
+
+        assertThat(result).isInstanceOf(SendResult.Rejected::class.java)
+        assertThat((result as SendResult.Rejected).code).isEqualTo(ErrorCodes.CONVERSATION_NOT_FOUND)
+    }
 }
