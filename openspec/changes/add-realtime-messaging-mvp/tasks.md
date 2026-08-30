@@ -54,7 +54,7 @@
 ## 7. Automated verification
 
 - [x] 7.1 Add backend unit tests for protocol parsing, validation, authorization, and isolated multi-session fan-out.
-- [ ] 7.2 Add PostgreSQL integration tests for foreign/unique constraints, deterministic ordering, commit-before-success behavior, matching/conflicting idempotency, and concurrent duplicate commands.
+- [x] 7.2 Add PostgreSQL integration tests for foreign/unique constraints, deterministic ordering, commit-before-success behavior, matching/conflicting idempotency, and concurrent duplicate commands.
 - [ ] 7.3 Add frontend tests for protocol parsing, pending → sent/failed reconciliation, authoritative-id deduplication, reconnect retry, and missed-history refresh.
 
 ## 8. End-to-end verification
