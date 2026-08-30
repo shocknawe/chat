@@ -12,6 +12,7 @@ import {
 import { ConversationList } from './components/ConversationList'
 import { ThreadPane } from './components/ThreadPane'
 import { UserSelectScreen } from './components/UserSelectScreen'
+import { useChatSocket } from './hooks/useChatSocket'
 import { initials } from './initials'
 
 /**
@@ -96,6 +97,13 @@ interface SignedInShellProps {
  * stale across reloads.
  */
 function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
+  // Realtime connection (task 6.2): the socket lifecycle is bound to this
+  // identity — created once `currentUser` is established (this shell only
+  // renders then) and terminated on user switch/unmount. The returned
+  // `sendMessage` is consumed by the composer in task 6.3, event handlers by
+  // 6.4/6.5, and `connectionState` by the availability indicator in 6.6.
+  useChatSocket(user.id)
+
   const conversationsQuery = useQuery({
     queryKey: ['conversations', user.id],
     queryFn: () => fetchConversations(user.id),

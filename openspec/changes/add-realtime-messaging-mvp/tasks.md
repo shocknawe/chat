@@ -44,7 +44,7 @@
 ## 6. Frontend — WebSocket client module (realtime-messaging)
 
 - [x] 6.1 Build a WebSocket client module (outside React) responsible for connect with the selected user, serialize outgoing commands, parse incoming events, dispatch to app code, reconnect with backoff, retain unacknowledged commands in memory, and cleanup.
-- [ ] 6.2 Establish the WebSocket connection when the current user is established and associate realtime events with that user.
+- [x] 6.2 Establish the WebSocket connection when the current user is established and associate realtime events with that user.
 - [ ] 6.3 Wire message submit: prevent empty/whitespace, send `SEND_MESSAGE` with a `clientMessageId`, show the message as pending.
 - [ ] 6.4 Implement a single authoritative-message upsert path keyed by server message id; on `MESSAGE_ACK`, replace the correlated pending item, and on `ERROR`, mark it failed.
 - [ ] 6.5 On `NEW_MESSAGE`, upsert into the active conversation without refresh; for other conversations update or invalidate the relevant cache without changing the active conversation.
