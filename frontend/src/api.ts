@@ -19,6 +19,18 @@ export interface User {
 export interface Conversation {
   id: string
   participants: User[]
+  /**
+   * Slice 3 (task 4.0): the conversation's latest message under the history
+   * ordering (`createdAt ASC, id ASC`), or no value when the history is empty.
+   *
+   * Wire form: the backend's global Jackson `non_null` inclusion OMITS the
+   * property for an empty history — it is never serialised as a literal
+   * `null`. The optional typing (`lastMessage?: Message`) is the recorded
+   * decision's `absent === null` contract: consumers must treat a missing key
+   * and a null value identically, and the rail renders both as "no messages
+   * yet".
+   */
+  lastMessage?: Message
 }
 
 /** The authoritative message shape (mirrors the backend `MessageDto`). */

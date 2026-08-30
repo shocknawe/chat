@@ -47,13 +47,13 @@ is never cut (slices 2–4 depend on it to be demonstrable).
 
 ## 4. Slice 3 — Rail previews
 
-- [ ] 4.0 Decide and record the wire form of an empty preview. `spring.jackson.default-property-inclusion: non_null` means a null `lastMessage` is **omitted from the JSON**, not serialised as `null`. Either annotate the conversation DTO so the property is always emitted, or accept omission — then make `docs/openapi.yaml` (1.3) and the frontend types say the same thing, and have the frontend treat absent and null identically
-- [ ] 4.1 Assemble `Conversation.lastMessage` (latest by `createdAt ASC, id ASC`, empty when there is no history) in listing and creation responses via one `findFirstByConversation_IdOrderByCreatedAtDescIdDesc` per conversation (served by the existing `(conversation_id, created_at, id)` index as a backward scan), and add an `@EntityGraph` on `findByParticipants_Id` for `participants` — the listing already does an N+1 on participants today, and this change makes N grow
-- [ ] 4.2 Render rail previews from `lastMessage`, with "no messages yet" for empty histories
-- [ ] 4.3 Apply the pending/failed client-side override over the server preview
-- [ ] 4.4 Update previews on acknowledgement and new-message events without refetching the listing
-- [ ] 4.5 Test: a conversation's preview matches the last message of its history under the documented ordering
-- [ ] 4.6 Frontend test: the pending/failed preview override
+- [x] 4.0 Decide and record the wire form of an empty preview. `spring.jackson.default-property-inclusion: non_null` means a null `lastMessage` is **omitted from the JSON**, not serialised as `null`. Either annotate the conversation DTO so the property is always emitted, or accept omission — then make `docs/openapi.yaml` (1.3) and the frontend types say the same thing, and have the frontend treat absent and null identically *(decision: omission accepted — `ConversationDto.lastMessage: MessageDto?` carries no `@JsonInclude` opt-out, so an empty history is an omitted property, never a literal `null`; recorded in the DTO's KDoc and mirrored in `docs/openapi.yaml`, where `lastMessage` is an optional, non-nullable `Message` (no `nullable: true`, which was OpenAPI 3.0-style anyway) with `x-status: planned` removed. Frontend: type `lastMessage?: Message` and treat absent === null)*
+- [x] 4.1 Assemble `Conversation.lastMessage` (latest by `createdAt ASC, id ASC`, empty when there is no history) in listing and creation responses via one `findFirstByConversation_IdOrderByCreatedAtDescIdDesc` per conversation (served by the existing `(conversation_id, created_at, id)` index as a backward scan), and add an `@EntityGraph` on `findByParticipants_Id` for `participants` — the listing already does an N+1 on participants today, and this change makes N grow
+- [x] 4.2 Render rail previews from `lastMessage`, with "no messages yet" for empty histories
+- [x] 4.3 Apply the pending/failed client-side override over the server preview
+- [x] 4.4 Update previews on acknowledgement and new-message events without refetching the listing
+- [x] 4.5 Test: a conversation's preview matches the last message of its history under the documented ordering *(repository-level: `MessagePersistenceIntegrationTest` pins `findFirstByConversation_IdOrderByCreatedAtDescIdDesc` against the ASC-ASC history, including a createdAt tie and the empty case; wire-level: `ConversationPreviewApiIntegrationTest` pins the listing preview to the history's tail field-for-field, the omitted-property empty form in 201/200/listing, and the 200 already-existed body matching the listing)*
+- [x] 4.6 Frontend test: the pending/failed preview override
 
 ## 5. Slice 4 — Presence
 

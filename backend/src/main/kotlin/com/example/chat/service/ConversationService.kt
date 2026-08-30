@@ -74,10 +74,25 @@ class ConversationService(
 
     private val log = LoggerFactory.getLogger(ConversationService::class.java)
 
-    /** Conversations spec: "Conversations are scoped to the participating user". */
+    /**
+     * Conversations spec: "Conversations are scoped to the participating user".
+     *
+     * Each conversation is mapped with its own `lastMessage` preview — one
+     * [MessageRepository.findFirstByConversation_IdOrderByCreatedAtDescIdDesc]
+     * per conversation, served by the `(conversation_id, created_at, id)`
+     * composite index as a backward scan (design.md decision 5). That
+     * deliberate N+1 is the accepted bound (`O(N)+1`): everything else is
+     * fetched in bulk, `participants` via the `@EntityGraph` on
+     * [ConversationRepository.findByParticipants_Id], and the alternative — a
+     * denormalized `last_message_id` maintained in the message-write
+     * transaction — would drag a write-ordering concern into the message path
+     * this change does not want yet. Runs inside the read-only transaction, so
+     * the preview rows and the conversations they decorate are transactionally
+     * consistent with each other.
+     */
     @Transactional(readOnly = true)
     fun findConversationsForUser(userId: UUID): List<ConversationDto> =
-        conversationRepository.findByParticipants_Id(userId).map { it.toDto() }
+        conversationRepository.findByParticipants_Id(userId).map { it.toDto(latestPreview(it.id)) }
 
     /**
      * Conversations spec: "Message history is authorized by participation"
@@ -142,8 +157,14 @@ class ConversationService(
         val pairKey = Conversation.pairKeyFor(callerId, participantId)
 
         // Best-effort fast path for the common case, NOT the source of truth
-        // for correctness (see above).
-        conversationRepository.findByPairKey(pairKey)?.let { return CreateResult.Existing(it.toDto()) }
+        // for correctness (see above). The preview lookup runs the same one
+        // indexed query per conversation the listing does, so a `200`
+        // already-existed response carries exactly the shape `GET
+        // /api/conversations` returns for that row (conversation-previews spec:
+        // "Creation responses carry the same preview shape as the listing") —
+        // including for a pair whose conversation already holds history.
+        conversationRepository.findByPairKey(pairKey)
+            ?.let { return CreateResult.Existing(it.toDto(latestPreview(it.id))) }
 
         return try {
             val conversation = conversationWriter.createAndCommit(callerId, participantId, pairKey)
@@ -178,16 +199,39 @@ class ConversationService(
                 )
                 throw ex
             }
-            CreateResult.Existing(existing.toDto())
+            CreateResult.Existing(existing.toDto(latestPreview(existing.id)))
         }
     }
+
+    /**
+     * The empty-history half of the preview contract, shared by the listing and
+     * both creation outcomes: one
+     * [MessageRepository.findFirstByConversation_IdOrderByCreatedAtDescIdDesc]
+     * per conversation (`null` ⇔ no history → the DTO omits `lastMessage`). One
+     * place, so listing and creation can never drift into different
+     * representations of an empty preview (conversation-previews spec,
+     * "Creation responses carry the same preview shape as the listing").
+     */
+    private fun latestPreview(conversationId: UUID): Message? =
+        messageRepository.findFirstByConversation_IdOrderByCreatedAtDescIdDesc(conversationId)
 }
 
-private fun Conversation.toDto(): ConversationDto = ConversationDto(
+/**
+ * Maps a [Conversation] to its REST shape together with the preview fetched by
+ * the caller — [lastMessage] is `null` for an empty history, which under the
+ * app-wide `non_null` Jackson inclusion rule the serialiser then *omits* from
+ * the JSON rather than emitting a literal `null` (task 4.0 decision, see
+ * [ConversationDto]'s doc). The `participants` collection must already be
+ * initialised when this runs: every query producing a [Conversation] that
+ * reaches a DTO (`findByParticipants_Id`, `findByPairKey`) fetches it via an
+ * `@EntityGraph`, because these mappings execute with `open-in-view: false`.
+ */
+private fun Conversation.toDto(lastMessage: Message?): ConversationDto = ConversationDto(
     id = id,
     participants = participants
         .map { UserDto(id = it.id, displayName = it.displayName) }
         .sortedBy { it.displayName },
+    lastMessage = lastMessage?.toDto(),
 )
 
 private fun Message.toDto(): MessageDto = MessageDto(

@@ -32,6 +32,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import * as api from "./api";
 import type { Conversation, Message, User } from "./api";
+import { EMPTY_PREVIEW } from "./conversationPreview";
 import { COMPACT_QUERY } from "./hooks/useMediaQuery";
 import { queryClient } from "./queryClient";
 import * as realtime from "./realtime";
@@ -95,6 +96,23 @@ async function renderSignedInOnConversation(): Promise<
   return user;
 }
 
+/** The conversation rail (slice 3 previews live here). */
+function rail(): HTMLElement {
+  return screen.getByRole("navigation");
+}
+
+/**
+ * The active conversation's thread pane. Since slice 3, the rail ALSO renders
+ * the latest message's content (its preview), so thread-only assertions
+ * (`getAllByText(...)` counts, duplicate-render checks) must be scoped here —
+ * an unscoped query would legitimately match the rail row too.
+ */
+function threadPane(): HTMLElement {
+  const pane = document.querySelector<HTMLElement>(".thread-pane");
+  expect(pane).not.toBeNull();
+  return pane as HTMLElement;
+}
+
 beforeEach(() => {
   queryClient.clear();
   window.sessionStorage.clear();
@@ -119,8 +137,8 @@ describe("pending → sent/failed reconciliation (App-level)", () => {
     await user.type(textbox, "Hello there");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
-    expect(await screen.findByText("Sending…")).toBeInTheDocument();
-    expect(screen.getByText("Hello there")).toBeInTheDocument();
+    expect(await within(threadPane()).findByText("Sending…")).toBeInTheDocument();
+    expect(within(threadPane()).getByText("Hello there")).toBeInTheDocument();
 
     const socket = captured[0];
     expect(socket).toBeDefined();
@@ -140,10 +158,13 @@ describe("pending → sent/failed reconciliation (App-level)", () => {
     });
 
     await waitFor(() =>
-      expect(screen.queryByText("Sending…")).not.toBeInTheDocument(),
+      expect(within(threadPane()).queryByText("Sending…")).not.toBeInTheDocument(),
     );
-    // Exactly one bubble with this content — no duplicate render.
-    expect(screen.getAllByText("Hello there")).toHaveLength(1);
+    // Exactly one bubble with this content — no duplicate render. Scoped to
+    // the thread pane: the rail ALSO displays "Hello there" since slice 3,
+    // where the acked message became the conversation's preview (task 4.4).
+    expect(within(threadPane()).getAllByText("Hello there")).toHaveLength(1);
+    expect(within(rail()).getByText("Hello there")).toBeInTheDocument();
   });
 
   it("a correlated ERROR marks the pending bubble failed and never removes it", async () => {
@@ -155,7 +176,7 @@ describe("pending → sent/failed reconciliation (App-level)", () => {
     });
     await user.type(textbox, "This will fail");
     await user.click(screen.getByRole("button", { name: "Send" }));
-    expect(await screen.findByText("Sending…")).toBeInTheDocument();
+    expect(await within(threadPane()).findByText("Sending…")).toBeInTheDocument();
 
     const socket = captured[0]!;
     const sent = socket.sendMessage.mock.calls[0]?.[0] as {
@@ -171,9 +192,14 @@ describe("pending → sent/failed reconciliation (App-level)", () => {
       });
     });
 
-    expect(await screen.findByText("Failed to send")).toBeInTheDocument();
+    expect(
+      await within(threadPane()).findByText("Failed to send"),
+    ).toBeInTheDocument();
+    // The rail reads the same failure (task 4.3 override) — the unscoped
+    // getByText would now find two, so the assertions stay thread-scoped.
+    expect(within(rail()).getByText("Failed to send")).toBeInTheDocument();
     // The bubble is retained, not removed.
-    expect(screen.getByText("This will fail")).toBeInTheDocument();
+    expect(within(threadPane()).getByText("This will fail")).toBeInTheDocument();
   });
 });
 
@@ -288,7 +314,7 @@ describe("missed-history refresh after reconnect", () => {
       .spyOn(api, "fetchMessages")
       .mockResolvedValue([msg("m1", "2026-08-30T12:00:00.000Z")]);
     await renderSignedInOnConversation();
-    await screen.findByText("content-m1");
+    await within(threadPane()).findByText("content-m1");
     expect(fetchMessagesSpy).toHaveBeenCalledTimes(1);
 
     const socket = captured[0]!;
@@ -315,7 +341,7 @@ describe("missed-history refresh after reconnect", () => {
     );
 
     await renderSignedInOnConversation();
-    await screen.findByText("content-m1");
+    await within(threadPane()).findByText("content-m1");
 
     const socket = captured[0]!;
     // Establish the shell's FIRST connected transition (excluded from refetch).
@@ -346,7 +372,7 @@ describe("missed-history refresh after reconnect", () => {
         message: midFlightMessage,
       });
     });
-    expect(await screen.findByText("content-m2")).toBeInTheDocument();
+    expect(await within(threadPane()).findByText("content-m2")).toBeInTheDocument();
 
     // The server's reconnect-triggered response reports history missed while
     // disconnected (m3) but — realistically for an in-flight snapshot — not
@@ -361,13 +387,18 @@ describe("missed-history refresh after reconnect", () => {
     });
 
     // All three render, each exactly once, in chronological order — the
-    // merge neither erased the mid-flight m2 nor duplicated m1/m3.
+    // merge neither erased the mid-flight m2 nor duplicated m1/m3. Scoped to
+    // the thread pane: the rail ALSO renders the tail ("content-m3") as its
+    // preview since slice 3's task-4.4 patch.
     await waitFor(() =>
-      expect(screen.getByText("content-m3")).toBeInTheDocument(),
+      expect(within(threadPane()).getByText("content-m3")).toBeInTheDocument(),
     );
-    expect(screen.getAllByText(/^content-m/)).toHaveLength(3);
-    const order = screen.getAllByText(/^content-m/).map((el) => el.textContent);
+    expect(within(threadPane()).getAllByText(/^content-m/)).toHaveLength(3);
+    const order = within(threadPane())
+      .getAllByText(/^content-m/)
+      .map((el) => el.textContent);
     expect(order).toEqual(["content-m1", "content-m2", "content-m3"]);
+    expect(within(rail()).getByText("content-m3")).toBeInTheDocument();
   });
 });
 
@@ -680,5 +711,178 @@ describe("CONVERSATION_CREATED rail reconciliation (task 3.9)", () => {
 
     await screen.findByRole("button", { name: "Carol" });
     expect(screen.getAllByRole("button", { name: "Carol" })).toHaveLength(1);
+  });
+});
+
+/**
+ * Slice 3 — rail previews (OpenSpec tasks 4.2–4.6, spec
+ * `conversation-previews`). The rail rows render the server-provided
+ * `lastMessage`, the client-side pending/failed override applies over it, and
+ * MESSAGE_ACK / NEW_MESSAGE advance the preview by patching the cached
+ * conversations array — never by refetching the listing.
+ */
+describe("rail previews (tasks 4.2–4.6)", () => {
+  const LATEST_FROM_BOB_T = "2026-08-30T11:59:00.000Z";
+  const LATEST_FROM_BOB = msg("m-latest", LATEST_FROM_BOB_T, {
+    content: "Latest from Bob",
+  });
+  // The backend OMITS `lastMessage` for an empty history (task 4.0), so the
+  // empty-history fixture is an object literal WITHOUT the key.
+  const EMPTY_CONVERSATION: Conversation = {
+    id: "conv-empty",
+    participants: [USER_A, USER_C],
+  };
+
+  beforeEach(() => {
+    vi.spyOn(api, "fetchMessages").mockResolvedValue([]);
+  });
+
+  it("renders the server preview, and 'No messages yet' for the key-less empty-history form (task 4.2)", async () => {
+    vi.spyOn(api, "fetchConversations").mockResolvedValue([
+      { ...CONVERSATION, lastMessage: LATEST_FROM_BOB },
+      EMPTY_CONVERSATION,
+    ]);
+    await renderSignedInOnConversation();
+
+    expect(within(rail()).getByText("Latest from Bob")).toBeInTheDocument();
+    expect(within(rail()).getByText(EMPTY_PREVIEW)).toBeInTheDocument();
+    expect(within(rail()).getByText("No messages yet")).toBeInTheDocument();
+    expect(api.fetchConversations).toHaveBeenCalledTimes(1);
+  });
+
+  it("overrides the server preview with 'Sending…' while the newest own message awaits acknowledgement (tasks 4.3/4.6)", async () => {
+    vi.spyOn(api, "fetchConversations").mockResolvedValue([
+      { ...CONVERSATION, lastMessage: LATEST_FROM_BOB },
+    ]);
+    const user = await renderSignedInOnConversation();
+    expect(within(rail()).getByText("Latest from Bob")).toBeInTheDocument();
+
+    const textbox = await screen.findByRole("textbox", {
+      name: /message to bob/i,
+    });
+    await user.type(textbox, "Hello there");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(within(rail()).getByText("Sending…")).toBeInTheDocument(),
+    );
+    // The server preview is overridden, not shown alongside.
+    expect(within(rail()).queryByText("Latest from Bob")).not.toBeInTheDocument();
+  });
+
+  it("overrides the server preview with 'Failed to send' when the newest own message was rejected (tasks 4.3/4.6)", async () => {
+    vi.spyOn(api, "fetchConversations").mockResolvedValue([
+      { ...CONVERSATION, lastMessage: LATEST_FROM_BOB },
+    ]);
+    const user = await renderSignedInOnConversation();
+
+    const textbox = await screen.findByRole("textbox", {
+      name: /message to bob/i,
+    });
+    await user.type(textbox, "This will fail");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(await within(threadPane()).findByText("Sending…")).toBeInTheDocument();
+
+    const socket = captured[0]!;
+    const sent = socket.sendMessage.mock.calls[0]?.[0] as {
+      clientMessageId: string;
+    };
+    act(() => {
+      socket.options.onEvent?.({
+        type: "ERROR",
+        clientMessageId: sent.clientMessageId,
+        code: "PERSISTENCE_ERROR",
+        reason: "boom",
+      });
+    });
+
+    await waitFor(() =>
+      expect(within(rail()).getByText("Failed to send")).toBeInTheDocument(),
+    );
+    expect(within(rail()).queryByText("Latest from Bob")).not.toBeInTheDocument();
+  });
+
+  it("updates the preview on acknowledgement by cache patch, without refetching the listing (task 4.4)", async () => {
+    const fetchConversationsSpy = vi
+      .spyOn(api, "fetchConversations")
+      .mockResolvedValue([{ ...CONVERSATION, lastMessage: LATEST_FROM_BOB }]);
+    const user = await renderSignedInOnConversation();
+    expect(fetchConversationsSpy).toHaveBeenCalledTimes(1);
+
+    const textbox = await screen.findByRole("textbox", {
+      name: /message to bob/i,
+    });
+    await user.type(textbox, "Hello there");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(await within(threadPane()).findByText("Sending…")).toBeInTheDocument();
+
+    const socket = captured[0]!;
+    const sent = socket.sendMessage.mock.calls[0]?.[0] as {
+      clientMessageId: string;
+    };
+    act(() => {
+      socket.options.onEvent?.({
+        type: "MESSAGE_ACK",
+        clientMessageId: sent.clientMessageId,
+        message: msg("server-1", "2026-08-30T12:00:00.000Z", {
+          senderId: USER_A.id,
+          content: "Hello there",
+        }),
+      });
+    });
+
+    // The override retires (its pending item is gone) and the acked message
+    // IS the new server preview…
+    await waitFor(() =>
+      expect(within(rail()).getByText("Hello there")).toBeInTheDocument(),
+    );
+    // …and the listing was never refetched for it.
+    expect(fetchConversationsSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates the preview on a received message by cache patch, without refetching the listing (task 4.4)", async () => {
+    const fetchConversationsSpy = vi
+      .spyOn(api, "fetchConversations")
+      .mockResolvedValue([{ ...CONVERSATION, lastMessage: LATEST_FROM_BOB }]);
+    await renderSignedInOnConversation();
+    expect(fetchConversationsSpy).toHaveBeenCalledTimes(1);
+
+    const socket = captured[0]!;
+    act(() => {
+      socket.options.onEvent?.({
+        type: "NEW_MESSAGE",
+        message: msg("m-in", "2026-08-30T12:30:00.000Z", {
+          content: "Hi Alice",
+        }),
+      });
+    });
+
+    await waitFor(() =>
+      expect(within(rail()).getByText("Hi Alice")).toBeInTheDocument(),
+    );
+    expect(within(rail()).queryByText("Latest from Bob")).not.toBeInTheDocument();
+    expect(fetchConversationsSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a MESSAGE event for a conversation the rail does not list (message events never invent rows)", async () => {
+    const fetchConversationsSpy = vi
+      .spyOn(api, "fetchConversations")
+      .mockResolvedValue([{ ...CONVERSATION, lastMessage: LATEST_FROM_BOB }]);
+    await renderSignedInOnConversation();
+
+    const socket = captured[0]!;
+    act(() => {
+      socket.options.onEvent?.({
+        type: "NEW_MESSAGE",
+        message: msg("m-stranger", "2026-08-30T12:30:00.000Z", {
+          conversationId: "conv-unknown",
+          content: "From an unlisted conversation",
+        }),
+      });
+    });
+    // No row invented; the listed row is untouched.
+    expect(within(rail()).queryByRole("button", { name: "Carol" })).toBeNull();
+    expect(within(rail()).getByText("Latest from Bob")).toBeInTheDocument();
+    expect(fetchConversationsSpy).toHaveBeenCalledTimes(1);
   });
 });

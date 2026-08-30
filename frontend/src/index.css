@@ -929,11 +929,31 @@ body[data-theme='dark'] .conversation-tile--active {
   background: var(--brand-gradient);
 }
 
+.conversation-copy {
+  /* Second grid column: min-width so the name/preview ellipsis below has a
+     bounded line to truncate against. */
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
 .conversation-name {
   display: block;
   overflow: hidden;
   font-size: 14px;
   font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Rail preview (tasks 4.2–4.3): one muted line under the name, truncating
+   exactly like the one-shot design's `.conversation-preview`. */
+.conversation-preview {
+  display: block;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

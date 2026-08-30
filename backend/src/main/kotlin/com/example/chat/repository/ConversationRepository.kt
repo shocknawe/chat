@@ -11,7 +11,20 @@ interface ConversationRepository : JpaRepository<Conversation, UUID> {
      * Conversations in which [userId] participates (conversations spec:
      * "Conversations are scoped to the participating user"). Derived from
      * the `participants` many-to-many collection on [Conversation].
+     *
+     * `participants` is fetched via an `@EntityGraph` for the same reason
+     * [findByPairKey] is: the query runs inside
+     * [com.example.chat.service.ConversationService.findConversationsForUser]'s
+     * read-only transaction but the mapping to [com.example.chat.api.dto.ConversationDto]
+     * touches the collection while that context is still open, and — more
+     * importantly — without the graph the listing pays one lazy-load query per
+     * conversation just for its participants. Slice 3 (task 4.1) adds a second
+     * query per conversation for the `lastMessage` preview, so the participants
+     * N+1 is collapsed first rather than grown: with the graph the whole
+     * listing is N+1 *only* in the deliberate, indexed preview lookup, never in
+     * the participant join.
      */
+    @EntityGraph(attributePaths = ["participants"])
     fun findByParticipants_Id(userId: UUID): List<Conversation>
 
     /**

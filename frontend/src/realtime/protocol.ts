@@ -123,12 +123,22 @@ function isUser(value: unknown): value is Conversation['participants'][number] {
   return isRecord(value) && typeof value.id === 'string' && typeof value.displayName === 'string'
 }
 
+/**
+ * Mirrors the REST `User`/`Conversation` DTOs shared with `../api.ts`.
+ * Slice 3 (task 4.0): `lastMessage` is optional and — per the backend's global
+ * `non_null` Jackson inclusion — is OMITTED for an empty history, never
+ * serialised as a literal `null`. A defensive `null` is still accepted here
+ * (absent === null) and normalised to absent by the CONVERSATION_CREATED arms
+ * below, so the parsed event matches the frontend's `lastMessage?: Message`
+ * contract exactly.
+ */
 function isConversation(value: unknown): value is Conversation {
   return (
     isRecord(value) &&
     typeof value.id === 'string' &&
     Array.isArray(value.participants) &&
-    value.participants.every(isUser)
+    value.participants.every(isUser) &&
+    (value.lastMessage === undefined || value.lastMessage === null || isMessage(value.lastMessage))
   )
 }
 
@@ -193,9 +203,16 @@ export function parseInboundEvent(raw: string): InboundEvent | null {
       if (!isConversation(json.conversation)) {
         return null
       }
+      // Normalise (see isConversation): an empty history is an ABSENT
+      // `lastMessage` — a defensive literal null is coerced to absence so
+      // consumers only ever see `lastMessage?: Message`.
+      const { lastMessage, ...conversation } = json.conversation
       const event: ConversationCreatedEvent = {
         type: 'CONVERSATION_CREATED',
-        conversation: json.conversation,
+        conversation:
+          lastMessage === undefined || lastMessage === null
+            ? conversation
+            : { ...conversation, lastMessage },
       }
       return event
     }

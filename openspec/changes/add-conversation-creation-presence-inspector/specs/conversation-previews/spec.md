@@ -41,7 +41,7 @@ WHEN a conversation's most recent message exists, the system SHALL summarise it 
 - **THEN** its rail row states that there are no messages yet
 
 ### Requirement: Pending or failed own messages override the preview
-WHEN the current user's newest message in a conversation is awaiting acknowledgement or was rejected, the system SHALL let that client-side state override the preview wording as sending or not sent.
+WHEN the current user's newest message in a conversation is awaiting acknowledgement or was rejected, the system SHALL let that client-side state override the preview wording as sending or not sent. The override stands only while the pending or failed item is itself the newest activity in the conversation: a newer confirmed or received message renders as the preview even if a failed item remains.
 
 #### Scenario: Sending state overrides preview
 - **WHEN** the current user's newest message in a conversation is awaiting acknowledgement

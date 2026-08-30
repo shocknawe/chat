@@ -1,5 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import type { Conversation } from '../api'
+import { conversationPreview } from '../conversationPreview'
+import type { PendingMessage } from '../hooks/usePendingMessages'
 import { initials } from '../initials'
 
 /**
@@ -11,6 +13,16 @@ import { initials } from '../initials'
  * list (`{ id, displayName }`), so the label is the OTHER participants' names
  * joined. Only if a conversation somehow has no other participant do we fall
  * back to a shortened-id label — no invented fields.
+ *
+ * Rail preview (tasks 4.2–4.3): under the label the row summarises the latest
+ * activity — the conversation's server-provided `lastMessage` content
+ * (truncated by CSS), "Sending…"/"Failed to send" while the current user's
+ * newest message there is awaiting acknowledgement/rejected (the same status
+ * words the thread uses), or "No messages yet" for an empty history. The
+ * preview is marked `aria-hidden`: the row's accessible name stays the
+ * conversation label so identity-first navigation ("Bob") is not buried under
+ * a message-length name — the full content is one activation away in the
+ * thread, which states the empty-history case itself.
  *
  * Every state is announced in words (DESIGN.md, Status-Is-Text): a text
  * status line + skeleton tiles while loading, `role="alert"` with retry on
@@ -39,6 +51,12 @@ interface ConversationListProps {
   isPending: boolean
   error: Error | null
   onRetry: () => void
+  /**
+   * The current user's optimistic outbound items (tasks 4.3, 6.3): the slice
+   * belonging to each conversation drives that row's pending/failed preview
+   * override. Same store the thread pane renders its bubbles from.
+   */
+  pendingMessages: PendingMessage[]
   selectedId: string | null
   onSelect: (conversationId: string) => void
   /** True while the viewport is below the compact breakpoint (task 2.6). */
@@ -63,6 +81,7 @@ export function ConversationList({
   isPending,
   error,
   onRetry,
+  pendingMessages,
   selectedId,
   onSelect,
   isCompact = false,
@@ -158,7 +177,16 @@ export function ConversationList({
                   <span className="avatar" aria-hidden="true">
                     {initials(label)}
                   </span>
-                  <span className="conversation-name">{label}</span>
+                  <span className="conversation-copy">
+                    <span className="conversation-name">{label}</span>
+                    {/* Task 4.2/4.3: server preview, or the pending/failed
+                        override — see the module header for the wording rules.
+                        Truncated by CSS, never by code: the full content lives
+                        in the thread. */}
+                    <span className="conversation-preview" aria-hidden="true">
+                      {conversationPreview(conversation, pendingMessages)}
+                    </span>
+                  </span>
                 </button>
               </li>
             )

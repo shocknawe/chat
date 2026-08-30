@@ -183,6 +183,62 @@ class MessagePersistenceIntegrationTest {
     }
 
     @Test
+    fun `preview query returns the last element of the documented history ordering, ties included`() {
+        // The wire-preview guarantee (add-conversation-creation-presence-inspector
+        // slice 3, task 4.5): `findFirstByConversation_IdOrderByCreatedAtDescIdDesc`
+        // is the documented `(createdAt ASC, id ASC)` ordering reversed on BOTH
+        // keys, so its first row must be that ordering's last row — even for a
+        // `createdAt` tie, and even when the tie-loser was inserted last (an
+        // implementation accidentally keyed on insertion order would pick the
+        // smaller id here and fail).
+        val sharedInstant = Instant.now().truncatedTo(ChronoUnit.MICROS)
+        val tieLoser = UUID.fromString("00000000-0000-0000-0000-000000000001")
+        val tieWinner = UUID.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff")
+
+        messageRepository.saveAndFlush(
+            Message(id = tieWinner, conversation = conversation, sender = alice, clientMessageId = UUID.randomUUID(), content = "tie winner, inserted first", createdAt = sharedInstant),
+        )
+        messageRepository.saveAndFlush(
+            Message(id = tieLoser, conversation = conversation, sender = bob, clientMessageId = UUID.randomUUID(), content = "tie loser, inserted last", createdAt = sharedInstant),
+        )
+
+        val history = messageRepository.findByConversation_IdOrderByCreatedAtAscIdAsc(conversation.id)
+        assertThat(history.map { it.id }).containsExactly(tieLoser, tieWinner)
+
+        val preview = messageRepository.findFirstByConversation_IdOrderByCreatedAtDescIdDesc(conversation.id)
+        // Same element the history ends on — the rail preview and the thread
+        // tail are two views of one ordering, never two orderings.
+        assertThat(preview?.id).isEqualTo(history.last().id).isEqualTo(tieWinner)
+        assertThat(preview?.id).isEqualTo(messageRepository.findById(tieWinner).orElseThrow().id)
+    }
+
+    @Test
+    fun `preview query orders primarily by createdAt and returns null for an empty history`() {
+        val earlierInstant = Instant.now().minusSeconds(60).truncatedTo(ChronoUnit.MICROS)
+        val laterInstant = Instant.now().truncatedTo(ChronoUnit.MICROS)
+        val laterLowId = UUID.fromString("00000000-0000-0000-0000-000000000000")
+        val earlierHighId = UUID.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff")
+
+        // Empty: no preview, the "no messages yet" case the DTO omits.
+        assertThat(messageRepository.findFirstByConversation_IdOrderByCreatedAtDescIdDesc(conversation.id)).isNull()
+
+        // Latest = the later createdAt, regardless of the id ordering.
+        messageRepository.saveAndFlush(
+            Message(id = earlierHighId, conversation = conversation, sender = alice, clientMessageId = UUID.randomUUID(), content = "earlier, high id", createdAt = earlierInstant),
+        )
+        messageRepository.saveAndFlush(
+            Message(id = laterLowId, conversation = conversation, sender = bob, clientMessageId = UUID.randomUUID(), content = "later, low id", createdAt = laterInstant),
+        )
+
+        val preview = messageRepository.findFirstByConversation_IdOrderByCreatedAtDescIdDesc(conversation.id)
+        assertThat(preview?.id).isEqualTo(laterLowId)
+
+        assertThat(
+            messageRepository.findByConversation_IdOrderByCreatedAtAscIdAsc(conversation.id).last().id,
+        ).isEqualTo(preview?.id)
+    }
+
+    @Test
     fun `foreign key rejects a message referencing a nonexistent conversation`() {
         val thrown = catchThrowable {
             entityManager.createNativeQuery(

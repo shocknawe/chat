@@ -1,20 +1,40 @@
 package com.example.chat.service
 
 import com.example.chat.api.dto.ConversationDto
+import com.example.chat.api.dto.MessageDto
 import com.example.chat.api.dto.UserDto
 import com.example.chat.domain.Conversation
+import com.example.chat.domain.Message
 import com.example.chat.repository.AppUserRepository
 import com.example.chat.repository.ConversationRepository
+import com.example.chat.repository.MessageRepository
 import com.example.chat.api.exception.ParticipantNotFoundException
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
-private fun Conversation.toDto(): ConversationDto = ConversationDto(
+/**
+ * Mirrors [ConversationService]'s private mapping deliberately: the writer's
+ * DTO is the one both the REST response and the `CONVERSATION_CREATED` event
+ * are built from, so it must carry the preview in the same representation the
+ * listing assembly produces — `null` for the empty history a fresh
+ * conversation always has, which the serialiser then omits from the JSON
+ * (task 4.0 decision; see [ConversationDto]'s doc).
+ */
+private fun Conversation.toDto(lastMessage: Message?): ConversationDto = ConversationDto(
     id = id,
     participants = participants
         .map { UserDto(id = it.id, displayName = it.displayName) }
         .sortedBy { it.displayName },
+    lastMessage = lastMessage?.toDto(),
+)
+
+private fun Message.toDto(): MessageDto = MessageDto(
+    id = id,
+    conversationId = conversation.id,
+    senderId = sender.id,
+    content = content,
+    createdAt = createdAt,
 )
 
 /**
@@ -54,6 +74,7 @@ private fun Conversation.toDto(): ConversationDto = ConversationDto(
 class ConversationWriter(
     private val conversationRepository: ConversationRepository,
     private val appUserRepository: AppUserRepository,
+    private val messageRepository: MessageRepository,
 ) {
 
     /**
@@ -81,6 +102,16 @@ class ConversationWriter(
         // transaction, so a losing concurrent duplicate throws here rather
         // than at some later, harder-to-attribute flush point.
         val saved = conversationRepository.saveAndFlush(conversation)
-        return saved.toDto()
+        // The preview query runs inside this still-open transaction, exactly as
+        // the listing's per-conversation lookup does, so both responses build
+        // their `lastMessage` the same way — for a *newly created* conversation
+        // it always finds nothing (a brand-new row has no messages yet), which
+        // is the point: the 201 body, the `CONVERSATION_CREATED` event built
+        // from the same DTO, and the next listing all represent the empty
+        // history identically (conversation-previews spec, "New conversation
+        // has no preview"). Not special-cased to a literal `null` on purpose —
+        // an assembly short-circuit here is exactly the kind of divergence from
+        // the listing path that would one day ship a different empty shape.
+        return saved.toDto(messageRepository.findFirstByConversation_IdOrderByCreatedAtDescIdDesc(saved.id))
     }
 }

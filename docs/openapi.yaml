@@ -390,7 +390,10 @@ paths:
                 creator, who already holds the REST response, and never when the
                 endpoint returned the `200` (already-existed) case. The embedded
                 `conversation` always has an absent/null `lastMessage` (a newly created
-                conversation has no messages yet).
+                conversation has no messages yet — the same *omitted-property*
+                representation an empty history takes in the listing; the
+                property is never serialised as a literal `null` (see the
+                `Conversation` schema's `lastMessage` description).
               schema:
                 type: object
                 required: [type, conversation]
@@ -483,15 +486,24 @@ components:
             $ref: "#/components/schemas/User"
         lastMessage:
           $ref: "#/components/schemas/Message"
-          x-status: planned
-          nullable: true
           description: |
-            The conversation's latest message by `(createdAt ASC, id ASC)` ordering, or
-            absent for an empty history. Deliberately **not** listed under `required`:
-            `spring.jackson.default-property-inclusion: non_null` means an empty
-            history's `null` value is *omitted* from the JSON entirely, not serialised
-            as a literal `null`. Clients must treat an absent property and an explicit
-            `null` identically.
+            The conversation's latest message under the documented history
+            ordering (`createdAt ASC, id ASC` — the same ordering
+            `/conversations/{id}/messages` returns, so the preview is the tail
+            element of that list), or **absent** for an empty history.
+
+            Wire form (`add-conversation-creation-presence-inspector` task 4.0
+            decision): the property is *omitted*, never serialised as a literal
+            `null` — `spring.jackson.default-property-inclusion: non_null` drops
+            the backend's `null` receiver from the JSON, and the DTO deliberately
+            does not opt out of that global rule. This schema therefore declares
+            `lastMessage` as an *optional* property of type `Message` — not
+            nullable, and deliberately **not** listed under `required`. Clients
+            MUST treat an absent property and an explicit `null` identically, in
+            every payload that embeds this schema (`GET /api/conversations`,
+            both `POST /api/conversations` success bodies, and
+            `CONVERSATION_CREATED`), so a serializer change either way stays
+            compatible without a contract bump.
 
     Message:
       type: object

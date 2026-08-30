@@ -20,7 +20,7 @@ import { COMPACT_QUERY, useMediaQuery } from './hooks/useMediaQuery'
 import { usePendingMessages } from './hooks/usePendingMessages'
 import { useTheme } from './hooks/useTheme'
 import { initials } from './initials'
-import { upsertAuthoritativeMessage } from './messagesCache'
+import { patchConversationPreview, upsertAuthoritativeMessage } from './messagesCache'
 import { queryClient } from './queryClient'
 import type {
   ConversationCreatedEvent,
@@ -255,6 +255,10 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
     (event: MessageAckEvent) => {
       removePending(event.clientMessageId)
       upsertAuthoritativeMessage(user.id, event.message)
+      // Task 4.4: the acknowledged message becomes the conversation's rail
+      // preview (cache patch, no listing refetch). With the pending item gone,
+      // the override retires and the row reads the server tail.
+      patchConversationPreview(user.id, event.message)
       // Task 2.7: delivery-status change, announced in words.
       announce('Message sent')
     },
@@ -298,16 +302,18 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
    * replaces in place, so a late or duplicate NEW_MESSAGE with an id already
    * cached can never produce a second rendered bubble.
    *
-   * No conversations-rail invalidation — deliberately: the `Conversation`
-   * DTO is `{ id, participants }` only, and the rail renders nothing derived
-   * from messages (no last-message preview, no unread count). Invalidating
-   * `['conversations', user.id]` here would refetch byte-identical data and
-   * steal nothing; if the DTO ever gains message-derived fields, this is the
-   * place to add the invalidation.
+   * Rail preview (task 4.4): the same event also advances that conversation's
+   * `lastMessage` in the cached conversations array — a cache patch, never a
+   * listing refetch. For a conversation id the rail does not list, the patch
+   * is deliberately a no-op: conversations enter the rail only via the
+   * listing, `POST /api/conversations`, or CONVERSATION_CREATED (3.9); a
+   * MESSAGE event alone carries no participants, and no row is invented for an
+   * unknown id (patchConversationPreview documents the rule).
    */
   const handleNewMessage = useCallback(
     (event: NewMessageEvent) => {
       upsertAuthoritativeMessage(user.id, event.message)
+      patchConversationPreview(user.id, event.message)
     },
     [user.id],
   )
@@ -324,9 +330,10 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
    *
    * The keyed guard makes re-delivery idempotent: a duplicate event for a
    * conversation the rail already lists is a no-op, never a second row.
-   * Empty preview: the `Conversation` DTO carried by the event has no
-   * message-derived fields yet (slice 3 owns previews), so "empty history" is
-   * the absence of `lastMessage` — nothing to derive.
+   * Preview: the `Conversation` DTO carried by the event has the same shape
+   * as the listing (slice 3) — `lastMessage` present for a non-empty history,
+   * omitted for an empty one — and the payload is stored as-is, so the row
+   * renders whatever the event actually carried.
    */
   const handleConversationCreated = useCallback(
     (event: ConversationCreatedEvent) => {
@@ -608,6 +615,7 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
           isPending={conversationsQuery.isPending}
           error={conversationsQuery.error}
           onRetry={() => void conversationsQuery.refetch()}
+          pendingMessages={pendingMessages}
           selectedId={selectedConversationId}
           onSelect={handleSelectConversation}
           isCompact={isCompact}
