@@ -100,5 +100,5 @@ is never cut (slices 2–4 depend on it to be demonstrable).
 ## 8. Final verification
 
 - [x] 8.1 Run the full backend test suite and frontend test suite
-- [ ] 8.2 Run `openspec validate add-conversation-creation-presence-inspector --strict` and resolve any findings
+- [x] 8.2 Run `openspec validate add-conversation-creation-presence-inspector --strict` and resolve any findings
 - [ ] 8.3 Verify the app under `docker compose up` end-to-end: create a conversation as Alice with Dan, observe Dan's rail update live in a second window, close Bob's windows one at a time and observe that only Alice is notified of the change, drop the connection and watch queued messages flush under original tokens
