@@ -15,11 +15,13 @@ export {
   parseInboundEvent,
   serializeCommand,
   ERROR_CODES,
+  type ConversationCreatedEvent,
   type ErrorCode,
   type ErrorEvent,
   type InboundEvent,
   type MessageAckEvent,
   type NewMessageEvent,
   type OutboundCommand,
+  type PresenceEvent,
   type SendMessageCommand,
 } from './protocol'

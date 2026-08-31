@@ -29,10 +29,12 @@ import {
   createChatSocket,
   type ChatSocket,
   type ConnectionState,
+  type ConversationCreatedEvent,
   type ErrorEvent,
   type InboundEvent,
   type MessageAckEvent,
   type NewMessageEvent,
+  type PresenceEvent,
   type SendMessageCommand,
 } from '../realtime'
 
@@ -49,6 +51,25 @@ export interface RealtimeEventHandlers {
   onNewMessage?: (event: NewMessageEvent) => void
   /** Correlated protocol/validation/persistence rejection. */
   onRealtimeError?: (event: ErrorEvent) => void
+  /** A new conversation this user participates in (task 3.9: rail update). */
+  onConversationCreated?: (event: ConversationCreatedEvent) => void
+  /** A full online-partner snapshot (task 5.4: wholesale presence replace). */
+  onPresence?: (event: PresenceEvent) => void
+  /**
+   * Slice 5: every connection-state transition, in chronological order. The
+   * hook mirrors the latest state itself; consumers register this when the
+   * TRANSITION (previous → next) matters, e.g. the reconnect classification
+   * and the recovery confirmation in `App.tsx`.
+   */
+  onStateChange?: (state: ConnectionState) => void
+  /**
+   * Slice 6 (task 7.2): passthrough for the socket's `onCommandSent`
+   * instrumentation — fired for every SEND_MESSAGE frame actually written to
+   * an open socket (immediate send and reconnect-queue flush alike). The
+   * transport ledger consumes this; it is not an inbound event and so lives
+   * beside, not inside, the dispatch switch.
+   */
+  onCommandSent?: (command: Omit<SendMessageCommand, 'type'>, sentAt: string) => void
 }
 
 export interface UseChatSocketResult {
@@ -60,6 +81,19 @@ export interface UseChatSocketResult {
    * (task 6.3's composer) supply the `clientMessageId`.
    */
   sendMessage: (command: Omit<SendMessageCommand, 'type'>) => void
+  /**
+   * Slice 5 (task 6.1): passthrough to the socket's cancel-backoff-and-dial-
+   * now control. Strict no-ops live inside the socket (connected, terminated,
+   * attempt already in flight), so the UI control is always enabled-safe.
+   */
+  reconnectNow: () => void
+  /**
+   * Slice 5 (task 6.5): passthrough to the demo-only connection-severing
+   * primitive. The METHOD is unconditionally available (tests exercise it);
+   * the UI CONTROL that calls it is gated on `import.meta.env.DEV` by the
+   * rendering component, so production bundles carry no such control.
+   */
+  dropConnection: () => void
   /** Number of outbound commands still awaiting ack/error. */
   pendingCount: () => number
 }
@@ -75,6 +109,12 @@ function dispatchRealtimeEvent(handlers: RealtimeEventHandlers, event: InboundEv
       break
     case 'ERROR':
       handlers.onRealtimeError?.(event)
+      break
+    case 'CONVERSATION_CREATED':
+      handlers.onConversationCreated?.(event)
+      break
+    case 'PRESENCE':
+      handlers.onPresence?.(event)
       break
   }
 }
@@ -106,10 +146,23 @@ export function useChatSocket(
   useEffect(() => {
     const socket = createChatSocket({
       userId,
+      // Hold a full second offline before the first reconnect attempt so a
+      // dropped connection (including the DEV "Test reconnect" control) shows a
+      // visible outage window rather than snapping straight back.
+      reconnect: { baseDelayMs: 1000 },
       // Every event arriving on this connection is associated with this hook's
       // `userId` — the identity validated at the handshake — and routed on.
       onEvent: (event) => dispatchRealtimeEvent(handlersRef.current, event),
-      onStateChange: setConnectionState,
+      onStateChange: (state) => {
+        // Mirror for `connectionState` first, then pass the transition on in
+        // arrival order — consumers see every state, not just the last one.
+        setConnectionState(state)
+        handlersRef.current.onStateChange?.(state)
+      },
+      // Task 7.2: the wire-write instrumentation hook, routed like any other
+      // callback through the ref so the connection is never torn down for a
+      // handler change.
+      onCommandSent: (command, sentAt) => handlersRef.current.onCommandSent?.(command, sentAt),
       // Parse/transport errors are non-fatal (the socket reconnects on its
       // own); log for now, richer surfacing can land with 6.4–6.6.
       onError: (error) => {
@@ -128,7 +181,15 @@ export function useChatSocket(
     socketRef.current?.sendMessage(command)
   }, [])
 
+  const reconnectNow = useCallback(() => {
+    socketRef.current?.reconnectNow()
+  }, [])
+
+  const dropConnection = useCallback(() => {
+    socketRef.current?.dropConnection()
+  }, [])
+
   const pendingCount = useCallback(() => socketRef.current?.pendingCount() ?? 0, [])
 
-  return { connectionState, sendMessage, pendingCount }
+  return { connectionState, sendMessage, reconnectNow, dropConnection, pendingCount }
 }

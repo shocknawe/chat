@@ -12,6 +12,7 @@ import org.mockito.ArgumentCaptor
 import org.mockito.Mockito.atLeast
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.web.socket.TextMessage
 import org.springframework.web.socket.WebSocketSession
 import java.io.IOException
@@ -33,7 +34,8 @@ import java.util.UUID
 class MessageCommandHandlerFanOutUnitTest {
 
     private val objectMapper = TestObjectMappers.create()
-    private val registry = ConnectionRegistry(objectMapper)
+    private val registry =
+        ConnectionRegistry(objectMapper, ApplicationEventPublisher { /* fan-out tests observe no presence edges */ })
     private val messageService = mock(MessageService::class.java)
     private val handler = MessageCommandHandler(messageService, registry)
 
@@ -49,6 +51,7 @@ class MessageCommandHandlerFanOutUnitTest {
         id = UUID.randomUUID(),
         conversationId = command.conversationId,
         senderId = sender.id,
+        clientMessageId = command.clientMessageId,
         content = command.content,
         createdAt = Instant.now(),
     )

@@ -13,6 +13,8 @@ import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.Mockito.`when`
+import org.mockito.Mockito.timeout
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.web.socket.TextMessage
 import org.springframework.web.socket.WebSocketSession
 import java.util.UUID
@@ -40,11 +42,16 @@ class WebSocketConnectionHandlerTest {
 
     private val objectMapper = TestObjectMappers.create()
 
-    private val connectionRegistry = ConnectionRegistry(objectMapper)
+    private val connectionRegistry = ConnectionRegistry(objectMapper, ApplicationEventPublisher { })
     private val protocolParser = ProtocolParser(objectMapper)
     private val messageCommandHandler = mock(MessageCommandHandler::class.java)
 
-    private val handler = WebSocketConnectionHandler(connectionRegistry, protocolParser, messageCommandHandler)
+    /** Real broadcaster over the real registry; [presenceService] is stubbed so snapshots are empty. */
+    private val presenceService = mock(com.example.chat.service.PresenceService::class.java)
+    private val presenceBroadcaster = PresenceBroadcaster(presenceService, connectionRegistry)
+
+    private val handler =
+        WebSocketConnectionHandler(connectionRegistry, protocolParser, messageCommandHandler, presenceBroadcaster)
 
     private val user = AuthenticatedUser(UUID.randomUUID(), "Alice")
 
@@ -146,5 +153,29 @@ class WebSocketConnectionHandlerTest {
 
         verify(session, never()).sendMessage(org.mockito.ArgumentMatchers.any(TextMessage::class.java))
         verifyNoInteractions(messageCommandHandler)
+    }
+
+    /**
+     * Task 5.3: the connect path enqueues the scoped presence snapshot before
+     * the session is registered, so the first event that connection receives
+     * is a `PRESENCE` snapshot -- even though the broadcaster delivers it
+     * asynchronously on its own single-threaded executor.
+     */
+    @Test
+    fun `a newly connected session is registered and receives its presence snapshot as its first event`() {
+        `when`(presenceService.partnerIdsOf(user.id)).thenReturn(emptySet())
+        val session = mockSession("s-connect")
+
+        handler.afterConnectionEstablished(session)
+
+        val captor = ArgumentCaptor.forClass(TextMessage::class.java)
+        verify(session, timeout(2000).times(1)).sendMessage(captor.capture())
+        val presence = objectMapper.readTree(captor.value.payload)
+        assertThat(presence.get("type").asText()).isEqualTo("PRESENCE")
+        assertThat(presence.get("online").isArray).isTrue()
+        assertThat(presence.get("online")).isEmpty()
+        // Registration still happened: the snapshot is enqueued first, not
+        // instead -- and the registered instance is the decorated wrapper.
+        assertThat(connectionRegistry.sessionById("s-connect")).isNotNull()
     }
 }

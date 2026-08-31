@@ -9,7 +9,14 @@ import type { Message } from './api'
 import { compareMessages } from './messageOrder'
 
 function msg(id: string, createdAt: string): Message {
-  return { id, conversationId: 'conv-1', senderId: 'user-1', content: id, createdAt }
+  return {
+    id,
+    conversationId: 'conv-1',
+    senderId: 'user-1',
+    clientMessageId: `client-${id}`,
+    content: id,
+    createdAt,
+  }
 }
 
 describe('compareMessages', () => {

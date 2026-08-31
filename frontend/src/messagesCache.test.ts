@@ -8,9 +8,14 @@
  * the shared `queryClient` singleton, so it is cleared before every test.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Message } from './api'
+import type { Conversation, Message } from './api'
 import * as api from './api'
-import { fetchMergedHistory, mergeHistoryWithCache, upsertAuthoritativeMessage } from './messagesCache'
+import {
+  fetchMergedHistory,
+  mergeHistoryWithCache,
+  patchConversationPreview,
+  upsertAuthoritativeMessage,
+} from './messagesCache'
 import { queryClient } from './queryClient'
 
 const USER_ID = 'user-1'
@@ -21,6 +26,7 @@ function msg(id: string, createdAt: string, overrides: Partial<Message> = {}): M
     id,
     conversationId: CONVERSATION_ID,
     senderId: USER_ID,
+    clientMessageId: `client-${id}`,
     content: `content-${id}`,
     createdAt,
     ...overrides,
@@ -135,5 +141,58 @@ describe('fetchMergedHistory', () => {
 
     const result = await fetchMergedHistory(USER_ID, CONVERSATION_ID)
     expect(result.map((m) => m.id)).toEqual(['m1', 'm2'])
+  })
+})
+
+/**
+ * OpenSpec task 4.4 (spec `conversation-previews`, "previews update without a
+ * listing refetch"): the conversations-array patch that advances ONE
+ * conversation's rail preview on MESSAGE_ACK / NEW_MESSAGE.
+ */
+describe('patchConversationPreview', () => {
+  function listedConversations(conversations: Conversation[]): void {
+    queryClient.setQueryData<Conversation[]>(['conversations', USER_ID], conversations)
+  }
+
+  function listed(): Conversation[] | undefined {
+    return queryClient.getQueryData<Conversation[]>(['conversations', USER_ID])
+  }
+
+  it('sets the named conversation’s lastMessage in place, leaving siblings untouched', () => {
+    const other: Conversation = { id: 'conv-2', participants: [] }
+    listedConversations([
+      { id: CONVERSATION_ID, participants: [] },
+      other,
+    ])
+
+    patchConversationPreview(USER_ID, msg('m1', '2026-08-30T12:00:00.000Z'))
+
+    const conversations = listed()
+    expect(conversations?.[0]?.lastMessage?.id).toBe('m1')
+    expect(conversations?.[1]).toEqual(other)
+  })
+
+  it('is a no-op for a conversation id the rail does not list', () => {
+    const listedConversationsSnapshot: Conversation[] = [{ id: CONVERSATION_ID, participants: [] }]
+    listedConversations(listedConversationsSnapshot)
+
+    patchConversationPreview(
+      USER_ID,
+      msg('m1', '2026-08-30T12:00:00.000Z', { conversationId: 'conv-unknown' }),
+    )
+
+    expect(listed()).toEqual(listedConversationsSnapshot)
+  })
+
+  it('never rolls the preview backwards under the (createdAt, id) ordering (duplicate/out-of-order delivery)', () => {
+    const tail = msg('m2', '2026-08-30T12:00:05.000Z')
+    listedConversations([{ id: CONVERSATION_ID, participants: [], lastMessage: tail }])
+
+    const older = msg('m1', '2026-08-30T12:00:00.000Z')
+    patchConversationPreview(USER_ID, older)
+    expect(listed()?.[0]?.lastMessage).toEqual(tail)
+    // The same tail re-delivered is an equal-order replacement: harmless.
+    patchConversationPreview(USER_ID, tail)
+    expect(listed()?.[0]?.lastMessage).toEqual(tail)
   })
 })

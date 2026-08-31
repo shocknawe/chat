@@ -182,13 +182,15 @@ class ConversationApiIntegrationTest {
     }
 
     @Test
-    fun `GET history for a participant returns messages in deterministic chronological order without clientMessageId`() {
+    fun `GET history for a participant returns messages in deterministic chronological order with clientMessageId`() {
         val base = Instant.now().truncatedTo(ChronoUnit.MICROS)
+        val firstToken = UUID.randomUUID()
+        val secondToken = UUID.randomUUID()
         val first = messageRepository.saveAndFlush(
             Message(
                 conversation = conversationRepository.findById(SeedData.CONVERSATION_ID).orElseThrow(),
                 sender = appUserRepository.findById(SeedData.ALICE_ID).orElseThrow(),
-                clientMessageId = UUID.randomUUID(),
+                clientMessageId = firstToken,
                 content = "hello bob",
                 createdAt = base,
             ),
@@ -197,7 +199,7 @@ class ConversationApiIntegrationTest {
             Message(
                 conversation = conversationRepository.findById(SeedData.CONVERSATION_ID).orElseThrow(),
                 sender = appUserRepository.findById(SeedData.BOB_ID).orElseThrow(),
-                clientMessageId = UUID.randomUUID(),
+                clientMessageId = secondToken,
                 content = "hi alice",
                 createdAt = base.plusSeconds(1),
             ),
@@ -211,12 +213,17 @@ class ConversationApiIntegrationTest {
         )
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
-        assertThat(response.body).doesNotContain("clientMessageId")
 
         val messages: List<MessageDto> = objectMapper.readValue(response.body!!)
         assertThat(messages.map { it.id }).containsExactly(first.id, second.id)
         assertThat(messages.map { it.senderId }).containsExactly(SeedData.ALICE_ID, SeedData.BOB_ID)
         assertThat(messages.map { it.conversationId }).allMatch { it == SeedData.CONVERSATION_ID }
+        // The correlation token round-trips through history for every message,
+        // including one submitted by the other participant (message-persistence
+        // spec: "Correlation token is exposed in history and realtime events").
+        // It stays per-sender-scoped and non-authoritative — id is what
+        // identifies the message.
+        assertThat(messages.map { it.clientMessageId }).containsExactly(firstToken, secondToken)
     }
 
     @Test

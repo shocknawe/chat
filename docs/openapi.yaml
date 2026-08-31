@@ -1,0 +1,590 @@
+openapi: 3.1.0
+info:
+  title: Realtime Chat API
+  version: 1.0.0
+  description: |
+    API for the realtime chat MVP (Spring Boot + Kotlin backend).
+
+    ## Authentication
+
+    Demo, non-secret identity binding ("window-scoped demo identity"):
+
+    - **REST**: every protected endpoint requires an `X-User-Id` header containing the
+      UUID of a seeded user. Missing, malformed, or unknown identities are rejected
+      with `401 Unauthorized` by Spring Security before reaching any controller.
+      The API is fully stateless — no session or cookie is created, so every request
+      re-authenticates from its header.
+    - **WebSocket**: the browser-native WebSocket API cannot set custom headers, so the
+      handshake carries the same id as a `?userId=` query parameter instead. Identity is
+      validated by a handshake interceptor using the exact same seeded-user check; an
+      unknown or missing id rejects the upgrade with HTTP `401` and no connection is
+      established.
+    - `GET /api/users`, `/actuator/health`, and `/actuator/info` are public.
+
+    `403 Forbidden` is reserved for a valid identity that is not a participant in the
+    requested conversation (checked per-request against the database). REST errors are
+    returned as RFC 7807 `application/problem+json` bodies.
+
+    ## Realtime (WebSocket) protocol
+
+    New messages are **not** created over REST. They are sent through the WebSocket
+    endpoint `GET /ws` (documented below under the path `/ws`, including the full
+    JSON protocol via `x-websocket-protocol`, since OpenAPI has no native WebSocket
+    support). Guarantees:
+
+    - The sender is always derived from the validated connection identity, never from
+      command JSON (a stray `senderId` field in a command is silently ignored).
+    - `clientMessageId` is a client-generated correlation/idempotency token only — the
+      authoritative message id and `createdAt` are always server-generated.
+    - Commit before acknowledgement or fan-out: `MESSAGE_ACK` is sent to the originating
+      connection only after the message transaction has committed.
+    - The originating connection receives exactly one authoritative delivery path
+      (`MESSAGE_ACK`); every *other* active connection belonging to either conversation
+      participant (including the sender's other sessions) receives `NEW_MESSAGE`.
+    - Protocol errors use stable machine-readable codes; the `reason` text is for
+      humans/logging only.
+servers:
+  - url: http://localhost:8080
+    description: Local development (override with SERVER_PORT env var)
+tags:
+  - name: Users
+    description: User directory
+  - name: Conversations
+    description: Conversation listing and message history
+  - name: Realtime
+    description: WebSocket endpoint for live messaging
+
+paths:
+  /api/users:
+    get:
+      tags: [Users]
+      summary: List available users
+      description: |
+        Public endpoint. Returns the configured MVP users so the frontend can present
+        selectable identities before any current user is established. Sorted by display
+        name.
+      operationId: listUsers
+      security: []
+      responses:
+        "200":
+          description: Available users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+              example:
+                - id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                  displayName: "Alice"
+                - id: "6ec0bd7f-11c0-43da-975e-2a8ad9ebae0b"
+                  displayName: "Bob"
+
+  /api/conversations:
+    get:
+      tags: [Conversations]
+      summary: List my conversations
+      description: |
+        Returns the conversations the authenticated user participates in. Conversations
+        are strictly scoped to the participating user — there is no way to list other
+        users' conversations.
+      operationId: listConversations
+      security:
+        - UserIdHeader: []
+      responses:
+        "200":
+          description: Conversations the caller participates in
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Conversations]
+      summary: Create (or reuse) a 1:1 conversation with another user
+      description: |
+        Starts a conversation between the caller (implicit, from `X-User-Id` — there is
+        no request field for it and no `403` on this endpoint, since the intent "open a
+        conversation with this person" is satisfied regardless of who asks) and
+        `participantId`.
+
+        **Idempotent, never `409`**: if the pair already has a conversation, that
+        existing conversation is returned with `200`; otherwise one is created and
+        returned with `201`. Callers should treat both statuses identically — the only
+        difference is whether a new row was created.
+
+        **`404` on this endpoint means something different from `404` on
+        `GET /api/conversations/{id}/messages`.** Here, `404` means `participantId` is
+        syntactically a UUID but does not name a directory user (`GET /api/users`).
+        There, `404` means the *conversation* referenced by the path does not exist.
+        Do not conflate the two: this endpoint never returns `404` for a conversation
+        (there may not be one yet — that is the `201` case), and the messages endpoint
+        never returns `404` for an unknown participant.
+
+        After the transaction that creates a new conversation commits, a
+        `CONVERSATION_CREATED` event (see `x-websocket-protocol`) is pushed to every
+        active connection of the *other* participant only — the caller already holds
+        this REST response and receives no duplicate notification over the socket.
+      operationId: createConversation
+      security:
+        - UserIdHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [participantId]
+              properties:
+                participantId:
+                  type: string
+                  format: uuid
+                  description: Directory user to start (or reuse) a conversation with
+            example:
+              participantId: "6ec0bd7f-11c0-43da-975e-2a8ad9ebae0b"
+      responses:
+        "201":
+          description: A new conversation was created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "200":
+          description: A conversation with this participant already existed and is returned as-is
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "400":
+          description: |
+            `participantId` is missing, is not a well-formed UUID, or names the caller
+            themselves (a conversation with oneself is not a supported shape).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              example:
+                type: "about:blank"
+                title: "Bad Request"
+                status: 400
+                detail: "participantId must not be the caller's own id."
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |
+            `participantId` is a well-formed UUID but does not name a directory user.
+            Distinct from `404` on `GET /api/conversations/{id}/messages`, which means
+            the conversation itself does not exist — see the operation description.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              example:
+                type: "about:blank"
+                title: "User Not Found"
+                status: 404
+                detail: "participantId does not name a directory user."
+
+  /api/conversations/{id}/messages:
+    get:
+      tags: [Conversations]
+      summary: Get message history
+      description: |
+        Returns the message history of a conversation in deterministic chronological
+        order. Message history is authorized by participation: a valid identity that is
+        not a participant receives `403` (distinct from `404`, which means the
+        conversation does not exist at all).
+      operationId: getMessageHistory
+      security:
+        - UserIdHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Conversation id
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Messages in chronological order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Authenticated user is not a participant of this conversation
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              example:
+                type: "about:blank"
+                title: "Forbidden"
+                status: 403
+                detail: "You are not a participant of this conversation."
+        "404":
+          description: Conversation does not exist
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+              example:
+                type: "about:blank"
+                title: "Conversation Not Found"
+                status: 404
+
+  /ws:
+    get:
+      tags: [Realtime]
+      summary: WebSocket upgrade — live messaging channel
+      description: |
+        Upgrades to a WebSocket connection. Raw Spring WebSocket (`TextWebSocketHandler`)
+        — deliberately **no** STOMP, broker, or Spring Messaging. Allowed origins: `*`
+        (local single-origin MVP demo posture; the browser-native WebSocket API does not
+        enforce CORS the way `fetch`/XHR does).
+
+        Identity is provided via the `userId` query parameter (the browser WebSocket API
+        cannot set headers) and validated during the HTTP upgrade itself against the
+        same seeded users as REST. A missing or unknown id rejects the handshake with
+        HTTP `401` — the connection is never established.
+
+        Once connected, all traffic is JSON text frames using the protocol in
+        `x-websocket-protocol`.
+      operationId: websocketUpgrade
+      security: []
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          description: UUID of a seeded user (same identities as the REST `X-User-Id` header)
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "101":
+          description: Switching Protocols — WebSocket connection established
+        "401":
+          description: Missing or unknown `userId` — handshake rejected, no connection established
+      x-websocket-protocol:
+        frameFormat: "JSON text frames. Client→server messages are commands; server→client messages are events. Both sides are discriminated by a `type` string property."
+        unknownProperties: "Unknown JSON properties are ignored (Jackson fail-on-unknown-properties: false)."
+        clientToServer:
+          description: |
+            Inbound commands. `SEND_MESSAGE` is the only command in the MVP. It has no
+            `senderId` field — the sender is always the validated connection identity.
+            `clientMessageId` is a client-generated UUID used purely for correlation and
+            idempotency: resending the same `clientMessageId` with the same conversation
+            and content returns the already-persisted message (no duplicate); reusing it
+            with *different* content or conversation is rejected with
+            `CLIENT_MESSAGE_ID_CONFLICT`. `content` must be 1–4000 characters,
+            non-blank (mirrored by the database column length).
+          messages:
+            SEND_MESSAGE:
+              description: Create a new message in a conversation
+              schema:
+                type: object
+                required: [type, clientMessageId, conversationId, content]
+                properties:
+                  type:
+                    type: string
+                    const: SEND_MESSAGE
+                  clientMessageId:
+                    type: string
+                    format: uuid
+                    description: Client-generated correlation/idempotency token (never the authoritative message id)
+                  conversationId:
+                    type: string
+                    format: uuid
+                  content:
+                    type: string
+                    minLength: 1
+                    maxLength: 4000
+              example:
+                type: "SEND_MESSAGE"
+                clientMessageId: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                conversationId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                content: "Hello!"
+        serverToClient:
+          description: |
+            Outbound events. `MESSAGE_ACK`, `NEW_MESSAGE`, and `CONVERSATION_CREATED`'s
+            embedded conversation reuse the authoritative REST `Message`/`Conversation`
+            shapes. `clientMessageId` was originally described as appearing only
+            alongside the message in `MESSAGE_ACK` and `ERROR`, never inside the message
+            payload itself — **that omission is reversed** (see the `Message` schema
+            description): the token is now part of the `Message` shape directly, so it
+            is present in `NEW_MESSAGE` and `CONVERSATION_CREATED`'s (absent, since a
+            newly created conversation has no messages) embedded message too.
+            `MessageAck.clientMessageId` and `ErrorEvent.clientMessageId` remain at the
+            event level for existing consumers that correlate on them — on `MESSAGE_ACK`
+            this is redundant with `message.clientMessageId`, retained for compatibility.
+          messages:
+            MESSAGE_ACK:
+              description: |
+                Sent to the originating connection only, once, after the message
+                transaction has committed ("commit before acknowledgement or fan-out").
+                The embedded message carries the server-generated `id` and `createdAt`.
+              schema:
+                type: object
+                required: [type, clientMessageId, message]
+                properties:
+                  type:
+                    type: string
+                    const: MESSAGE_ACK
+                  clientMessageId:
+                    type: string
+                    format: uuid
+                  message:
+                    $ref: "#/components/schemas/Message"
+            NEW_MESSAGE:
+              description: |
+                Sent to every *other* active connection belonging to either conversation
+                participant (including the sender's other sessions) — never to the
+                originating connection for the same command.
+              schema:
+                type: object
+                required: [type, message]
+                properties:
+                  type:
+                    type: string
+                    const: NEW_MESSAGE
+                  message:
+                    $ref: "#/components/schemas/Message"
+            ERROR:
+              description: |
+                A correlated protocol/validation/persistence error. `clientMessageId` is
+                included when the failing command carried one; it is absent for errors
+                occurring before a command could be parsed (e.g. malformed JSON).
+                `code` is a stable machine-readable identifier; `reason` is
+                human-readable detail for logging/debugging only — do not branch on it.
+              schema:
+                type: object
+                required: [type, code, reason]
+                properties:
+                  type:
+                    type: string
+                    const: ERROR
+                  clientMessageId:
+                    type: string
+                    format: uuid
+                  code:
+                    $ref: "#/components/schemas/WsErrorCode"
+                  reason:
+                    type: string
+              example:
+                type: "ERROR"
+                clientMessageId: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+                code: "INVALID_CONTENT"
+                reason: "Message content must not be blank."
+            CONVERSATION_CREATED:
+              description: |
+                Sent after `POST /api/conversations` commits a *new* conversation, to
+                every active connection of the *other* participant only — never to the
+                creator, who already holds the REST response, and never when the
+                endpoint returned the `200` (already-existed) case. The embedded
+                `conversation` always has an absent/null `lastMessage` (a newly created
+                conversation has no messages yet — the same *omitted-property*
+                representation an empty history takes in the listing; the
+                property is never serialised as a literal `null` (see the
+                `Conversation` schema's `lastMessage` description).
+              schema:
+                type: object
+                required: [type, conversation]
+                properties:
+                  type:
+                    type: string
+                    const: CONVERSATION_CREATED
+                  conversation:
+                    $ref: "#/components/schemas/Conversation"
+              example:
+                type: "CONVERSATION_CREATED"
+                conversation:
+                  id: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+                  participants:
+                    - id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                      displayName: "Alice"
+                    - id: "6ec0bd7f-11c0-43da-975e-2a8ad9ebae0b"
+                      displayName: "Bob"
+            PRESENCE:
+              description: |
+                A user's **online iff &ge;1 open connection** presence, scoped to only
+                the users the recipient shares a conversation with (a privacy boundary,
+                not a payload optimization: presence would otherwise leak across
+                conversations the recipient is not part of). `online` is always the
+                **wholesale, full scoped set** — a complete replacement of whatever the
+                client previously held, never a delta and never merged, and it never
+                contains the recipient themself (a user is not their own conversation
+                partner). This is deliberate: wholesale replacement is self-healing
+                across a dropped frame, at the cost of requiring the server to deliver
+                snapshots in the order they were computed — which it guarantees by
+                computing and enqueueing every presence broadcast on one
+                single-threaded executor. An empty `online` array is meaningful and is
+                always serialised (never omitted): it means none of this recipient's
+                conversation partners is online. Delivered in exactly two situations:
+                as the **first event on a newly established connection**, and on a
+                **presence transition** to every connected user sharing a conversation
+                with the user whose state changed.
+              schema:
+                type: object
+                required: [type, online]
+                properties:
+                  type:
+                    type: string
+                    const: PRESENCE
+                  online:
+                    type: array
+                    description: Full replacement set of online user ids scoped to the recipient's conversation partners
+                    items:
+                      type: string
+                      format: uuid
+              example:
+                type: "PRESENCE"
+                online:
+                  - "6ec0bd7f-11c0-43da-975e-2a8ad9ebae0b"
+        errorCodes:
+          INVALID_COMMAND: "Payload was not valid JSON, used an unsupported/missing `type`, or otherwise failed to parse into a known command."
+          INVALID_CONTENT: "`SEND_MESSAGE.content` was empty, whitespace-only, or exceeded the configured maximum length (4000)."
+          CONVERSATION_NOT_FOUND: "`SEND_MESSAGE.conversationId` does not reference an existing conversation."
+          FORBIDDEN: "The connection's authenticated sender does not participate in the referenced conversation."
+          CLIENT_MESSAGE_ID_CONFLICT: "`clientMessageId` was already used by this sender with a different conversation or content."
+          PERSISTENCE_ERROR: "An unexpected persistence/commit failure occurred; the message was NOT created."
+
+components:
+  securitySchemes:
+    UserIdHeader:
+      type: apiKey
+      in: header
+      name: X-User-Id
+      description: |
+        Demo identity: the UUID of a seeded user (as returned by `GET /api/users`).
+        Non-secret, window-scoped, stateless — every request re-authenticates from this
+        header. Missing/malformed/unknown values yield `401`.
+
+  schemas:
+    User:
+      type: object
+      required: [id, displayName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+
+    Conversation:
+      type: object
+      required: [id, participants]
+      properties:
+        id:
+          type: string
+          format: uuid
+        participants:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        lastMessage:
+          $ref: "#/components/schemas/Message"
+          description: |
+            The conversation's latest message under the documented history
+            ordering (`createdAt ASC, id ASC` — the same ordering
+            `/conversations/{id}/messages` returns, so the preview is the tail
+            element of that list), or **absent** for an empty history.
+
+            Wire form (`add-conversation-creation-presence-inspector` task 4.0
+            decision): the property is *omitted*, never serialised as a literal
+            `null` — `spring.jackson.default-property-inclusion: non_null` drops
+            the backend's `null` receiver from the JSON, and the DTO deliberately
+            does not opt out of that global rule. This schema therefore declares
+            `lastMessage` as an *optional* property of type `Message` — not
+            nullable, and deliberately **not** listed under `required`. Clients
+            MUST treat an absent property and an explicit `null` identically, in
+            every payload that embeds this schema (`GET /api/conversations`,
+            both `POST /api/conversations` success bodies, and
+            `CONVERSATION_CREATED`), so a serializer change either way stays
+            compatible without a contract bump.
+
+    Message:
+      type: object
+      required: [id, conversationId, senderId, clientMessageId, content, createdAt]
+      description: |
+        Authoritative message shape, shared by REST history and all WebSocket events.
+
+        `clientMessageId` was **originally deliberately NOT** part of this shape — it
+        stayed an internal persistence/deduplication field, surfaced only as a
+        correlation token in WebSocket `MESSAGE_ACK`/`ERROR` events, never here. **That
+        decision is reversed**: the token is now included directly on the message
+        itself, everywhere a message appears (REST history and every realtime event
+        that carries one), including for messages sent by another participant.
+        Reversal reason: the inspector needs received messages and post-reload history
+        to show their honest correlation token instead of a fabricated one. Exposure
+        does not change the token's authority — it remains a per-sender idempotency
+        key, never an identifier; the server-generated `id` is authoritative
+        (message-persistence spec, "Exposure does not change the token's authority").
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Server-generated authoritative message id
+        conversationId:
+          type: string
+          format: uuid
+        senderId:
+          type: string
+          format: uuid
+        clientMessageId:
+          type: string
+          format: uuid
+          description: |
+            Client-generated correlation/idempotency token the message was submitted
+            under, scoped to its sender. Never the authoritative identifier and never
+            usable by anyone other than its own sender to retry/deduplicate — see the
+            schema description above for the history of this field's exposure.
+        content:
+          type: string
+          maxLength: 4000
+        createdAt:
+          type: string
+          format: date-time
+          description: Server-generated timestamp
+
+    ProblemDetail:
+      type: object
+      description: RFC 7807 problem detail (Spring `ProblemDetail`)
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri
+
+    WsErrorCode:
+      type: string
+      description: Stable machine-readable WebSocket error code
+      enum:
+        - INVALID_COMMAND
+        - INVALID_CONTENT
+        - CONVERSATION_NOT_FOUND
+        - FORBIDDEN
+        - CLIENT_MESSAGE_ID_CONFLICT
+        - PERSISTENCE_ERROR
+
+  responses:
+    Unauthorized:
+      description: |
+        Missing, malformed, or unknown `X-User-Id` identity. Raised by Spring Security
+        before any controller logic runs; the exact body shape is the entry point's
+        (not guaranteed to be a ProblemDetail).

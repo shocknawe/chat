@@ -49,6 +49,10 @@ dependencies {
 	testImplementation("org.junit.jupiter:junit-jupiter")
 	testImplementation("org.testcontainers:junit-jupiter:1.20.4")
 	testImplementation("org.testcontainers:postgresql:1.20.4")
+	// Validates docs/openapi.yaml parses as a well-formed OpenAPI document
+	// (OpenApiSpecValidationTest) — the contract-first workflow's one
+	// automated guardrail against a hand-edited spec silently breaking.
+	testImplementation("io.swagger.parser.v3:swagger-parser:2.1.47")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -60,4 +64,11 @@ kotlin {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	// docs/openapi.yaml lives outside this module (repo-root docs/), so
+	// Gradle's up-to-date check would not otherwise notice it changed and
+	// would skip re-running OpenApiSpecValidationTest — declare it as an
+	// explicit input so editing the spec always invalidates the cache.
+	inputs.file(layout.projectDirectory.file("../docs/openapi.yaml"))
+		.withPropertyName("openApiSpec")
+		.withPathSensitivity(PathSensitivity.RELATIVE)
 }

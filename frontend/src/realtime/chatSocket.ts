@@ -5,7 +5,13 @@
  * serialize outgoing SEND_MESSAGE commands, parse incoming events with runtime
  * validation, dispatch them to app code via plain option callbacks, reconnect
  * with exponential backoff after unexpected disconnects, retain unacknowledged
- * commands in memory for idempotent retry, and clean up on demand.
+ * commands in memory for idempotent retry, and clean up on demand. Slice 5
+ * (tasks 6.1, 6.1a, 6.5) adds `reconnectNow()` (immediate dial with strict
+ * no-ops), the one-live-socket guarantee in `connect()`, and `dropConnection()`
+ * (non-1000 cut whose close event re-engages the reconnect path). Slice 6
+ * (task 7.2) adds the `onCommandSent` instrumentation hook: one dispatch per
+ * SEND_MESSAGE frame actually written to an open socket, feeding the info
+ * drawer's session-scoped transport ledger.
  *
  * Deliberately free of any React (or other framework) import: React wiring in
  * task 6.2 consumes the factory + callbacks below and nothing else.
@@ -90,6 +96,15 @@ export interface ChatSocketOptions {
   reconnect?: ReconnectConfig
   /** Dispatched once per validated inbound event (`InboundEvent`). */
   onEvent?: (event: InboundEvent) => void
+  /**
+   * Slice 6 (task 7.2): instrumentation hook fired at the exact moment a
+   * SEND_MESSAGE command is WRITTEN to an open socket — immediate sends and
+   * every reconnect-queue flush alike. This is the client's one honest
+   * "the frame left this window" signal; the info drawer's transport ledger
+   * records each call as an observed step (a reconnect re-send is therefore
+   * observed as its own step, never merged or fabricated).
+   */
+  onCommandSent?: (command: Omit<SendMessageCommand, 'type'>, sentAt: string) => void
   /** Dispatched on every connection-state transition. */
   onStateChange?: (state: ConnectionState) => void
   /** Dispatched for malformed inbound frames and transport errors. Never throws. */
@@ -97,6 +112,34 @@ export interface ChatSocketOptions {
 }
 
 export interface ChatSocket {
+  /**
+   * Task 6.1: cancels any scheduled reconnect delay and attempts the next
+   * connection immediately. Deliberate no-ops (spec: "reconnect now" must
+   * NEVER open an additional connection):
+   *
+   * - while connected (nothing to reconnect to),
+   * - after `terminate()` (the client is intentionally dead),
+   * - while a connection attempt is already in flight — note that a FIRED
+   *   retry timer leaves `retryTimer === null` (scheduleReconnect nulls it
+   *   before calling `connect`), so this case is tracked by an explicit
+   *   in-flight flag, not by timer presence.
+   */
+  reconnectNow(): void
+
+  /**
+   * Task 6.5 (DEV-only demo primitive): severs the underlying connection
+   * WITHOUT terminating the client. The socket is closed with a NON-1000
+   * code so the browser's close event reaches the normal reconnect path —
+   * `terminate()` is the wrong primitive here: it is irreversible, clears
+   * the pending queue, and would end the demo instead of demonstrating
+   * recovery. After `dropConnection()` the unacknowledged queue survives and
+   * flushes on the next successful connection under the original
+   * `clientMessageId`s. Never called automatically by app code; production
+   * builds contain no control for it (the UI gate is on the CONTROL only —
+   * the method itself stays public and is exercised by tests).
+   */
+  dropConnection(): void
+
   /**
    * Sends a SEND_MESSAGE command. If the socket is open the command goes out
    * immediately; if it is connecting/reconnecting the command is queued and
@@ -161,6 +204,16 @@ export function createChatSocket(options: ChatSocketOptions): ChatSocket {
   let retryTimer: ReturnType<typeof setTimeout> | null = null
   let retryAttempt = 0
   let terminated = false
+  /**
+   * A connection attempt is in flight: from the moment `connect()` is
+   * entered until that socket resolves (open or close). This — not the
+   * retry timer — is the authoritative "already attempting" signal for
+   * `reconnectNow()`: `scheduleReconnect` nulls `retryTimer` BEFORE it calls
+   * `connect()`, so a fired timer means "no timer", never "not attempting"
+   * (task 6.1). Every path that ends an attempt (open, close, synchronous
+   * constructor throw) resets it.
+   */
+  let attemptInFlight = false
 
   /** FIFO of commands not yet acknowledged (or definitively rejected). */
   const pendingById = new Map<string, PendingCommand>()
@@ -193,10 +246,42 @@ export function createChatSocket(options: ChatSocketOptions): ChatSocket {
     for (const entry of pendingById.values()) {
       try {
         socket.send(entry.wire)
+        // Task 7.2: instrument the actual wire write — after `send` returns
+        // without throwing, the frame is handed to the browser's transport.
+        options.onCommandSent?.(entry.command, new Date().toISOString())
       } catch {
         // A failed send here means the socket is dying; the imminent close
         // event will schedule a reconnect and we flush again afterwards.
         return
+      }
+    }
+  }
+
+  /**
+   * Detaches listeners from and closes `target`, then forgets it. Both
+   * `connect()` (task 6.1a: opening must first RELEASE a previous socket, or
+   * a client can hold two live connections — two registry entries for one
+   * user, presence reporting online after the real one closes, and duplicate
+   * `NEW_MESSAGE` frames) and `terminate()` share this one path so neither
+   * ever leaves an orphaned, still-listening socket behind.
+   *
+   * `code` is the close code for a socket that is still open/connecting;
+   * callers pass 1000 (an intentional client-side release — the detachment
+   * before the close means the resulting close event can never schedule a
+   * second reconnect) or, for `dropConnection()`, nothing: that one detaches
+   * NOTHING precisely because its close event is the reconnect trigger.
+   */
+  function releaseSocket(target: WebSocket, code: number | undefined): void {
+    detachListeners(target)
+    if (
+      code !== undefined &&
+      (target.readyState === WebSocket.OPEN || target.readyState === WebSocket.CONNECTING)
+    ) {
+      try {
+        target.close(code)
+      } catch {
+        // An already-dead socket cannot be closed again; it is detached, so
+        // nothing can observe the failure.
       }
     }
   }
@@ -226,6 +311,7 @@ export function createChatSocket(options: ChatSocketOptions): ChatSocket {
   }
 
   function onOpen(): void {
+    attemptInFlight = false // this attempt resolved successfully
     retryAttempt = 0 // clean successful connect resets the backoff schedule
     setState('connected')
     // (Re)send every still-unacknowledged command with its unchanged
@@ -235,11 +321,13 @@ export function createChatSocket(options: ChatSocketOptions): ChatSocket {
   }
 
   function onClose(): void {
+    attemptInFlight = false // this attempt resolved (successfully or not)
     if (terminated) return
     // Any unexpected close — dropped connection, backend restart, handshake
-    // rejection (which surfaces as a failed upgrade then close) — retries on
-    // the backoff schedule. There is no attempt cap for the demo, and the
-    // exponential cap plus jitter prevents a handshake-reject hot-loop.
+    // rejection (which surfaces as a failed upgrade then close), or a
+    // `dropConnection()` cut — retries on the backoff schedule. There is no
+    // attempt cap for the demo, and the exponential cap plus jitter prevents
+    // a handshake-reject hot-loop.
     scheduleReconnect()
   }
 
@@ -257,12 +345,26 @@ export function createChatSocket(options: ChatSocketOptions): ChatSocket {
   }
 
   function connect(): void {
+    // Task 6.1: never a second attempt on top of an in-flight one, and never
+    // one after `terminate()` — the "no timer" state alone does not prove a
+    // fired timer has not already opened an attempt (see `attemptInFlight`).
+    if (terminated || attemptInFlight) return
+    attemptInFlight = true
+    // Task 6.1a: release ANY previous socket before opening the next one.
+    // The detachment (not the close code) is what prevents the old socket's
+    // close event from also feeding the reconnect loop.
+    if (socket !== null) {
+      const previous = socket
+      socket = null
+      releaseSocket(previous, 1000)
+    }
     let next: WebSocket
     try {
       next = new WebSocket(url)
     } catch {
       // e.g. malformed override URL — treat like a failed connection attempt
       // and fall into the regular backoff loop.
+      attemptInFlight = false
       options.onError?.({ kind: 'transport', message: 'Could not open WebSocket connection' })
       scheduleReconnect()
       return
@@ -279,6 +381,39 @@ export function createChatSocket(options: ChatSocketOptions): ChatSocket {
   connect()
 
   return {
+    reconnectNow(): void {
+      if (terminated) return // irreversible: a terminated client never dials again
+      if (state === 'connected') return // nothing to reconnect — no-op
+      // Cancel the scheduled delay so the next attempt is immediate. When an
+      // attempt is already in flight there is no timer to cancel (a fired
+      // timer nulls itself before dialling), so this is a harmless no-op in
+      // exactly the case the in-flight check below rejects.
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer)
+        retryTimer = null
+      }
+      if (attemptInFlight) return // already attempting: a second dial would race the first
+      connect()
+    },
+
+    dropConnection(): void {
+      if (terminated || socket === null) return
+      // Listeners stay attached ON PURPOSE: the close event is what engages
+      // the normal reconnect path (task 6.5 — the pending queue must survive
+      // so waiting messages flush on restore).
+      if (
+        socket.readyState === WebSocket.OPEN ||
+        socket.readyState === WebSocket.CONNECTING
+      ) {
+        // 4999: the highest app-defined close code — an ABNORMAL, client-side
+        // cut. A 1000 would read as an intentional final close and is exactly
+        // what `terminate()` uses; any non-1000 code drives the same
+        // client-side reconnect loop, and the backend unregisters every close
+        // code uniformly in `afterConnectionClosed`.
+        socket.close(4999)
+      }
+    },
+
     sendMessage(command: Omit<SendMessageCommand, 'type'>): void {
       if (terminated) return
       if (pendingById.has(command.clientMessageId)) return // app re-submit: dedupe
@@ -305,12 +440,11 @@ export function createChatSocket(options: ChatSocketOptions): ChatSocket {
         retryTimer = null
       }
       if (socket !== null) {
-        detachListeners(socket)
-        // 1000 = normal closure; intentional, so no reconnect is scheduled.
-        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-          socket.close(1000)
-        }
+        const previous = socket
         socket = null
+        // 1000 = normal closure; intentional, so the detached listeners can
+        // never schedule a reconnect from the resulting close event.
+        releaseSocket(previous, 1000)
       }
       pendingById.clear()
       setState('disconnected')

@@ -1,85 +1,145 @@
 /**
- * Token layer for the Realtime Messaging MVP — "The Lit Room" (DESIGN.md).
- * Zühlke purple→cyan glass world: one chromatic accent, one glass recipe,
- * light and dark as first-class equals. Values mirror DESIGN.md verbatim.
+ * Token + component layer for the re-skinned shell (Slice 1, tasks 2.1–2.8).
+ *
+ * Visual source of truth: `docs/one-shot/oneshot-info-drawer.html` — the
+ * approved "pale-blue/white planes" system (crisp blue-white surfaces,
+ * brand-gradient mark and avatars, purple own-message bubbles, compact Lato).
+ * Values are carried over verbatim so the running app and the approved
+ * artifact do not drift.
+ *
+ * Class names are NOT the one-shot's (`topbar`, `messages`, `bubble`, …): they
+ * are the names the re-skinned components already emit (`app-header`,
+ * `thread-scroll`, `message-bubble`, …). This file is written against those
+ * selectors, one block per component, so a class here always has a real
+ * emitter and a class in a component always has a rule here.
+ *
+ * Theming: the token layer flips through `[data-theme]` on the ROOT element —
+ * `theme.ts`'s `applyTheme` writes it to `document.documentElement` (the
+ * one-shot writes the same attribute to `body`; the cascade effect is
+ * identical, and the root is where the JS already owns the attribute and
+ * `color-scheme`). While `prefers-color-scheme` owns the dark block below, it
+ * is guarded with `:not([data-theme])` so it only serves the brief
+ * pre-hydration paint before JavaScript has applied the resolved theme — an
+ * explicit or JS-resolved choice always wins over the media query once React
+ * has run.
  */
 
 :root {
   color-scheme: light dark;
 
-  /* Brand */
+  /* Brand — one chromatic accent family, licensed to the mark, avatars,
+     send button, and the active-rail edge. Everything else is neutral. */
   --brand: #985b9c;
-  --brand-ink: #834f88;
-  --brand-grad: linear-gradient(45deg, #aa41af 5%, #3c69c8 60%, #00a5e6 100%);
-  --glow-1: #aa41af66;
+  --brand-ink: #79457f;
+  --brand-gradient: linear-gradient(135deg, #aa41af 4%, #3c69c8 58%, #00a5e6 100%);
+  --own: #834f88;
 
-  /* Semantic status (text forms are theme-tuned, per DESIGN.md; the raw warn
-     hue and its step-downs are theme-invariant — fills, borders, dots only) */
-  --ok: #088043;
-  --warn-ink: #8a5200;
-  --warn: #f2a33c;
-  --warn-tint: #f2a33c26;
-  --warn-stroke: #f2a33c59;
-  --danger: #b00020;
+  /* Planes: the ambient ground, the raised paper, and the blue tints. */
+  --ground: #eaf4ff;
+  --ground-deep: #dcecff;
+  --paper: #ffffff;
+  --blue-soft: #f3f8ff;
+  --blue-mist: #e6f1ff;
 
-  /* Fields + ink ramp */
-  --bg: #ebe7f5;
-  --bg-2: #f3f0fb;
-  --ink: #181320;
-  --ink-2: #524b62;
-  --ink-3: #736c88;
+  /* Ink ramp */
+  --ink: #142133;
+  --ink-2: #485b72;
+  --ink-3: #52677f;
 
-  /* Glass + stroke */
-  --surface: #ffffffa8;
-  --surface-2: #ffffff6b;
-  --surface-solid: #ffffff;
-  --stroke: #985b9c33;
-  --stroke-strong: #985b9c66;
-  --chip: #985b9c21;
-  --nav-active: #ffffffe6;
-  --bubble-own: #834f88;
+  /* Strokes */
+  --line: #c9d9ec;
+  --line-strong: #9fb9d8;
 
-  /* Depth */
-  --glass-blur: 22px;
-  --card-shadow:
-    0 18px 50px -24px rgba(90, 45, 120, 0.4),
-    0 2px 8px -4px rgba(90, 45, 120, 0.2);
+  /* Semantic status — every state is stated in words first; these tints are
+     the second signal, never the only one (spec: "state status in words"). */
+  --focus: #985b9c;
+  --ok: #087b47;
+  --ok-bg: #e4f5ec;
+  --ok-line: #a9d9c0;
+  --warn: #835000;
+  --warn-bg: #fff1d9;
+  --warn-line: #e5b96f;
+  --danger: #a30d29;
+  --danger-bg: #fff0f3;
+  --danger-line: #e7a5b1;
 
-  /* Radii + motion */
-  --r-sm: 12px;
-  --r-md: 18px;
-  --r-lg: 26px;
-  --r-pill: 999px;
+  --shadow: 0 22px 55px -34px rgba(42, 78, 122, 0.5), 0 3px 12px -8px rgba(42, 78, 122, 0.34);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 
-  /* Type */
-  --font-display: 'AA Zuehlke', Lato, system-ui, sans-serif;
-  --font-body: Lato, system-ui, -apple-system, sans-serif;
+  --font:
+    Lato, 'Avenir Next', Avenir, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-data: 'JetBrains Mono', 'SFMono-Regular', ui-monospace, Consolas, 'Liberation Mono', monospace;
+
+  /* Layout metrics. The compact breakpoint below (720px) MUST stay in sync
+     with `COMPACT_QUERY` in `hooks/useMediaQuery.ts`: the JS flag decides
+     which controls render (`mobile-rail-toggle`); the media query decides
+     where the rail is painted. They describe the same fact. */
+  --rail-width: 224px;
+  --header-height: 66px;
 }
 
+/* Explicit override: an attribute on the root means either the user chose a
+   theme (task 2.5) or JS resolved the default; either way it beats the media
+   query once it exists. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --brand-ink: #d6b6e0;
+  --own: #6c3f79;
+  --ground: #0b0813;
+  --ground-deep: #120c1f;
+  --paper: #171026;
+  --blue-soft: #211a32;
+  --blue-mist: #28203c;
+  --ink: #f3f0ff;
+  --ink-2: #c5bddc;
+  --ink-3: #a9a1c2;
+  --line: #403451;
+  --line-strong: #71608d;
+  --focus: #d6b6e0;
+  --ok: #2ec76f;
+  --ok-bg: #142d21;
+  --ok-line: #2c5f43;
+  --warn: #f2a33c;
+  --warn-bg: #332412;
+  --warn-line: #765329;
+  --danger: #ff6b7a;
+  --danger-bg: #35141e;
+  --danger-line: #86404d;
+  --shadow: 0 26px 62px -32px rgba(0, 0, 0, 0.88), 0 3px 14px -9px rgba(0, 0, 0, 0.72);
+}
+
+/* Pre-hydration paint (task 2.5): before React's first effect the theme
+   attribute does not exist yet, so the OS preference governs that first paint
+   and a dark-mode user never sees a light flash. `:not([data-theme])` makes
+   this block inert the moment `applyTheme` has run. Token values duplicate
+   the explicit-dark block above by necessity (CSS cannot alias a selector
+   list across a media query); keep the two in sync. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --ok: #2ec76f;
-    --warn-ink: #f2a33c;
-    --danger: #ff6b7a;
-    --bg: #0b0813;
-    --bg-2: #120c1f;
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --brand-ink: #d6b6e0;
+    --own: #6c3f79;
+    --ground: #0b0813;
+    --ground-deep: #120c1f;
+    --paper: #171026;
+    --blue-soft: #211a32;
+    --blue-mist: #28203c;
     --ink: #f3f0ff;
-    --ink-2: #b6afd4;
-    --ink-3: #7d7699;
-    --surface: #1e16348c;
-    --surface-2: #ffffff08;
-    --surface-solid: #171026;
-    --stroke: #a082ff29;
-    --stroke-strong: #a082ff80;
-    --chip: #a082ff24;
-    --nav-active: #ffffff0f;
-    --bubble-own: #6c3f79;
-    --brand-ink: #c9a6e3;
-    --glass-blur: 24px;
-    --card-shadow:
-      0 24px 60px -28px rgba(0, 0, 0, 0.8),
-      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    --ink-2: #c5bddc;
+    --ink-3: #a9a1c2;
+    --line: #403451;
+    --line-strong: #71608d;
+    --focus: #d6b6e0;
+    --ok: #2ec76f;
+    --ok-bg: #142d21;
+    --ok-line: #2c5f43;
+    --warn: #f2a33c;
+    --warn-bg: #332412;
+    --warn-line: #765329;
+    --danger: #ff6b7a;
+    --danger-bg: #35141e;
+    --danger-line: #86404d;
+    --shadow: 0 26px 62px -32px rgba(0, 0, 0, 0.88), 0 3px 14px -9px rgba(0, 0, 0, 0.72);
   }
 }
 
@@ -88,639 +148,982 @@
 }
 
 html {
-  font: 16px/1.5 var(--font-body);
+  height: 100%;
+  font: 16px/1.5 var(--font);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   margin: 0;
-  min-height: 100svh;
-  background: var(--bg);
+  min-width: 320px;
+  min-height: 100%;
+  /* The app is a fixed-viewport workspace: rail and thread scroll internally,
+     so the page itself never scrolls. */
+  overflow: hidden;
   color: var(--ink);
   caret-color: var(--brand);
-  transition: background-color 0.3s var(--ease);
-}
-
-/* Ambient shader: the purple→cyan field breathing behind the glass.
-   Static triple-radial fallback under reduced motion (DESIGN.md, Motion). */
-body::before {
-  content: '';
-  position: fixed;
-  inset: -30%;
-  z-index: -1;
   background:
-    radial-gradient(40% 45% at 22% 20%, #aa41af30, transparent 70%),
-    radial-gradient(45% 50% at 80% 25%, #3c69c82b, transparent 70%),
-    radial-gradient(50% 45% at 50% 90%, #00a5e629, transparent 70%);
-  filter: blur(50px);
-  animation: ambient-drift 42s ease-in-out infinite alternate;
+    radial-gradient(44rem 30rem at -4% -8%, rgba(170, 65, 175, 0.14), transparent 70%),
+    radial-gradient(42rem 36rem at 104% 8%, rgba(0, 165, 230, 0.14), transparent 66%),
+    linear-gradient(145deg, var(--ground) 0%, #f7fbff 52%, var(--ground-deep) 100%);
 }
 
-@keyframes ambient-drift {
-  from {
-    transform: translate3d(-2.5%, -1.5%, 0) scale(1);
-  }
-  to {
-    transform: translate3d(2.5%, 1.5%, 0) scale(1.06);
-  }
+body[data-theme='dark'] {
+  background:
+    radial-gradient(44rem 30rem at -4% -8%, rgba(170, 65, 175, 0.2), transparent 70%),
+    radial-gradient(42rem 36rem at 104% 8%, rgba(0, 165, 230, 0.16), transparent 66%),
+    linear-gradient(145deg, var(--ground) 0%, #100b1c 52%, var(--ground-deep) 100%);
 }
 
-#root {
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+  -webkit-tap-highlight-color: transparent;
 }
 
 ::selection {
-  background: var(--chip);
-  color: var(--brand-ink);
-}
-
-:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
-}
-
-/* ---------- Type recipes (DESIGN.md, integer ramp 11·12·13·14·15·16·20) ---------- */
-
-.display {
-  font-family: var(--font-display);
-  font-size: clamp(22px, 2.4vw, 30px);
-  font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  text-wrap: balance;
-}
-
-.title {
-  font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
-}
-
-.meta {
-  font-size: 12px;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ---------- The one glass recipe ---------- */
-
-.card {
-  position: relative;
-  background: var(--surface);
   color: var(--ink);
-  border: 1px solid var(--stroke);
-  border-radius: var(--r-lg);
-  box-shadow: var(--card-shadow);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  padding: 26px;
+  background: #d9c4e4;
 }
 
-/* Top-edge sheen — part of the recipe, not decoration. */
-.card::before {
-  content: '';
+/* Task 2.7: a visible focus indicator on EVERY operable control. One global
+   rule rather than per-component outlines, so a control added by a later
+   slice is correct by default. */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+/* ── Utilities ──────────────────────────────────────────────────────── */
+
+/* Screen-reader-only content (the live-region announcer). Rendered for
+   assistive technology, clipped for everyone else. */
+.sr-only {
   position: absolute;
-  top: 0;
-  left: 10%;
-  right: 10%;
+  width: 1px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
-  pointer-events: none;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-/* ---------- Brand mark + avatars (gradient-licensed surfaces) ---------- */
-
-.brand-mark {
-  display: inline-block;
-  width: 30px;
-  height: 30px;
-  border-radius: 11px;
-  background: var(--brand-grad);
+/* Task 2.7: the first focusable element of the signed-in shell, parked above
+   the viewport until it gains focus so it is visible to keyboards only. */
+.skip-link {
+  position: fixed;
+  left: 14px;
+  top: -80px;
+  z-index: 200;
+  padding: 12px 18px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--focus);
+  border-radius: 12px;
+  font-weight: 800;
+  text-decoration: none;
 }
 
-.brand-mark--sm {
-  width: 22px;
-  height: 22px;
-  border-radius: 8px;
+.skip-link:focus {
+  top: 14px;
 }
 
+/* Small supporting text: status lines, meta rows, error detail. */
+.meta {
+  margin: 2px 0 0;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* Base heading style shared by the brand, rail title, and thread title — one
+   type ramp so the shell reads as one surface. */
+.title {
+  margin: 0;
+  overflow: hidden;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon {
+  width: 20px;
+  height: 20px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Initials disc. Shares the brand gradient with the mark — the gradient
+   identifies PEOPLE and brand, never layout chrome. */
 .avatar {
-  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
+  flex: none;
   border-radius: 50%;
-  background: var(--brand-grad);
-  color: #ffffff;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  color: #fff;
+  background: var(--brand-gradient);
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
 }
 
 .avatar--sm {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   font-size: 11px;
 }
 
-/* ---------- Buttons (one family, pill, 50px) ---------- */
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 50px;
-  padding: 0 26px;
-  border: 1px solid transparent;
-  border-radius: var(--r-pill);
-  font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    background-color 0.2s var(--ease),
-    border-color 0.2s var(--ease),
-    transform 0.3s var(--ease);
+/* Loading placeholders (Status-Is-Text: the words say what is happening, the
+   shimmer tiles show where the content will land). */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
 }
 
-.btn-secondary {
-  background: var(--chip);
-  color: var(--brand-ink);
-  border-color: var(--stroke);
-}
-
-.btn-secondary:hover {
-  background: var(--surface-solid);
-  border-color: var(--stroke-strong);
-  transform: translateY(-2px);
-}
-
-.btn-ghost {
-  background: var(--surface);
-  color: var(--brand-ink);
-  border-color: var(--stroke);
-}
-
-.btn-ghost:hover {
-  border-color: var(--stroke-strong);
-  transform: translateY(-2px);
-}
-
-/* ---------- Identity selection gate ---------- */
-
-.gate {
-  flex: 1;
-  display: grid;
-  place-items: center;
-  padding: 18px;
-}
-
-.gate-card {
-  width: min(430px, 100%);
-  text-align: center;
-}
-
-.gate-greeting {
-  margin: 18px 0 9px;
-}
-
-.gate-subcopy {
-  margin: 0;
-  font-size: 15px;
-  color: var(--ink-2);
-  text-wrap: pretty;
-}
-
-.gate-status {
-  margin: 24px 0 0;
-}
-
-.identity-list {
-  list-style: none;
-  margin: 24px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.identity-tile {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  min-height: 64px;
-  padding: 14px 18px;
-  background: var(--surface-2);
-  color: var(--ink);
-  border: 1px solid var(--stroke);
-  border-radius: var(--r-md);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background-color 0.2s var(--ease),
-    border-color 0.2s var(--ease),
-    transform 0.3s var(--ease);
-}
-
-.identity-tile:hover {
-  background: var(--surface-solid);
-  border-color: var(--stroke-strong);
-  transform: translateY(-2px);
-}
-
-.identity-tile:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 4px var(--chip);
-  border-color: var(--brand);
-}
-
-.identity-name {
-  font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.identity-loading {
-  margin-top: 24px;
+.conversation-skeleton,
+.message-skeleton,
+.identity-skeleton {
+  height: 58px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(100deg, var(--blue-soft) 40%, var(--blue-mist) 50%, var(--blue-soft) 60%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
 }
 
 .identity-skeleton {
   height: 64px;
-  border-radius: var(--r-md);
-  background: var(--chip);
-  border: 1px solid var(--stroke);
-  animation: skeleton-pulse 1.4s var(--ease) infinite;
+  border-radius: 14px;
 }
 
-@keyframes skeleton-pulse {
-  0%,
-  100% {
-    opacity: 0.45;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-.gate-error {
-  margin-top: 24px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-}
-
-.gate-error-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--danger);
-}
-
-.gate-error-detail {
-  margin: 0;
-}
-
-/* ---------- App shell (chat layout) ---------- */
+/* ── Shell chrome (tasks 2.1, 2.5, 2.6, 2.7) ────────────────────────── */
 
 .shell {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 100svh;
+  height: 100svh;
+  display: grid;
+  grid-template-rows: var(--header-height) minmax(0, 1fr);
 }
 
+/* Task 2.1: the accessibly named header. Translucent over the ambient field
+   so the shell reads as one continuous plane, matching the one-shot topbar. */
 .app-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  position: relative;
+  z-index: 90;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 64px;
-  padding: 0 24px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--stroke);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
+  gap: 10px;
+  min-height: var(--header-height);
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.88);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 6px 24px -22px rgba(42, 78, 122, 0.8);
+  backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
 }
 
-.app-header-brand,
+body[data-theme='dark'] .app-header {
+  background: rgba(23, 16, 38, 0.92);
+  box-shadow: 0 8px 28px -22px rgba(0, 0, 0, 0.95);
+}
+
+.app-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
 .app-header-user {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 7px;
+  min-width: 0;
 }
 
-.app-header .btn-ghost {
-  height: 44px;
+.brand-mark {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 9px;
+  background: var(--brand-gradient);
+  box-shadow: 0 7px 18px -9px rgba(60, 105, 200, 0.8);
 }
 
-.chip {
+.brand-mark-icon {
+  width: 60%;
+  height: 60%;
+  display: block;
+  fill: #fff;
+}
+
+.brand-mark--sm {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+}
+
+/* The signed-in identity chip in the header's user cluster — the whole chip is
+   the "Switch user" control, with a caret hinting at the identity switcher. */
+.user-chip {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  padding: 6px 14px 6px 6px;
-  background: var(--chip);
+  gap: 7px;
+  min-height: 44px;
+  padding: 5px 8px 5px 6px;
   color: var(--brand-ink);
-  border-radius: var(--r-pill);
-  font-size: 15px;
+  background: #f6edf8;
+  border: 1px solid #dfc9e4;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    transform 0.18s var(--ease);
 }
 
-/* ---------- Connection availability indicator (task 6.6) ---------- */
+.user-chip:hover {
+  background: #f1e2f5;
+  border-color: #cdaed3;
+  transform: translateY(-1px);
+}
 
-/* The live-region wrapper: always mounted (empty while connected) so the
-   role="status" target never enters or leaves the accessibility tree — only
-   its content changes. */
-.connection-status {
-  display: flex;
+.user-chip-caret {
+  width: 16px;
+  height: 16px;
+  margin-left: 1px;
+  opacity: 0.72;
+}
+
+body[data-theme='dark'] .user-chip {
+  color: #e2c9e9;
+  background: #2c1c34;
+  border-color: #5e3b68;
+}
+
+body[data-theme='dark'] .user-chip:hover {
+  background: #372343;
+  border-color: #7a4f88;
+}
+
+/* Icon-only controls: rail toggle, theme toggle, thread inspector control.
+   44px is the smallest hit area that stays comfortable on touch screens. */
+.icon-button {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    background-color 0.18s var(--ease),
+    transform 0.18s var(--ease);
+}
+
+.icon-button:hover {
+  color: var(--brand-ink);
+  background: #fbf7fc;
+  border-color: #cdaed3;
+  transform: translateY(-1px);
+}
+
+body[data-theme='dark'] .icon-button {
+  background: var(--paper);
+}
+
+body[data-theme='dark'] .icon-button:hover {
+  background: var(--blue-soft);
+  border-color: #7a4f88;
+}
+
+/* The compact-viewport rail toggle (task 2.6). React renders it ONLY while
+   the compact query matches; the default `display: none` here covers the
+   pre-hydration frame before that flag is computed. */
+.mobile-rail-toggle {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .mobile-rail-toggle {
+    display: inline-grid;
+  }
+}
+
+/* Text buttons. `btn-secondary` is the default form (retry actions);
+   `btn-ghost` drops its box for low-stakes chrome like "Switch user". */
+.btn {
+  display: inline-flex;
   align-items: center;
-  margin: 0;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 13px;
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    background-color 0.18s var(--ease),
+    transform 0.18s var(--ease);
 }
 
-/* Pill recipe from DESIGN.md's connection-banner token: warn-tinted fill,
-   pill radius, words carrying the state with the dot as the second signal. */
+.btn:hover {
+  color: var(--brand-ink);
+  background: #fbf7fc;
+  border-color: #cdaed3;
+  transform: translateY(-1px);
+}
+
+body[data-theme='dark'] .btn {
+  background: var(--paper);
+}
+
+body[data-theme='dark'] .btn:hover {
+  background: var(--blue-soft);
+  border-color: #7a4f88;
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+body[data-theme='dark'] .btn-ghost {
+  background: transparent;
+}
+
+.btn-ghost:hover {
+  background: #fbf7fc;
+  border-color: var(--line);
+}
+
+body[data-theme='dark'] .btn-ghost:hover {
+  background: var(--blue-soft);
+}
+
+/* Connection availability pill (task 6.6, re-skinned). The word carries the
+   state; the tinted pill and dot are the second signal, never the only one. */
+.connection-status {
+  margin: 0;
+  min-width: 0;
+}
+
+.connection-status:empty {
+  display: none;
+}
+
 .connection-status-pill {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 14px;
-  font-size: 14px;
-  line-height: 1.3;
-  color: var(--ink-2);
-  background: var(--surface-2);
-  border: 1px solid var(--stroke);
-  border-radius: var(--r-pill);
-  animation: connection-status-enter 240ms var(--ease);
+  max-width: 42vw;
+  min-height: 34px;
+  padding: 0 12px;
+  overflow: hidden;
+  color: var(--ok);
+  background: var(--ok-bg);
+  border: 1px solid var(--ok-line);
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* The spec's "temporarily unavailable" state: calm, never a red alarm bar —
-   the dot carries the warn hue and tint, the words stay legible ink. */
 .connection-status-pill--warn {
-  color: var(--ink);
-  background: var(--warn-tint);
-  border-color: var(--warn-stroke);
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: var(--warn-line);
 }
 
 .connection-status-dot {
   width: 8px;
   height: 8px;
   flex: none;
-  border-radius: var(--r-pill);
-  background: var(--ink-3);
+  border-radius: 50%;
+  background: currentColor;
 }
 
-.connection-status-pill--warn .connection-status-dot {
-  background: var(--warn);
-}
-
-@keyframes connection-status-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
+/* The unavailable state draws attention without a colour-only cue: the word
+   says "reconnecting", the dot pulses. */
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
   }
 }
 
-.shell-body {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  gap: 18px;
-  padding: 18px;
-  align-items: stretch;
+.connection-status-pill--warn .connection-status-dot {
+  animation: pulse 1.15s ease-in-out infinite;
 }
 
-/* ---------- Conversation rail ---------- */
+/* ── Scrim (task 2.6) ───────────────────────────────────────────────── */
 
-.rail {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 18px;
+/* The overlay's dismissal-and-cue surface: a real <button> rendered ONLY
+   while an overlay is open, so it dims the shell, blocks it, and is itself
+   keyboard-activatable as the dismissal control it is. */
+.scrim {
+  position: fixed;
+  inset: var(--header-height) 0 0;
+  z-index: 60;
+  display: block;
+  padding: 0;
+  background: rgba(20, 33, 51, 0.28);
+  border: 0;
+  cursor: pointer;
+}
+
+/* ── Creation dialog (tasks 3.5–3.8) ────────────────────────────────── */
+
+/* Visual source: the one-shot's `newConversationGate` overlay (pale-blue veil
+   with brand radial tints, white raised panel, roomy option tiles). The
+   backdrop is a plain wrapper; the dismissal surface is a real <button>
+   (`dialog-scrim`) exactly like the rail's `.scrim`, but `tabindex="-1"`
+   because focus is confined INSIDE the panel while the dialog is open. */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 22px;
   overflow-y: auto;
 }
 
-.rail-title {
+.dialog-scrim {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  background:
+    radial-gradient(34rem 28rem at 8% 4%, rgba(170, 65, 175, 0.18), transparent 68%),
+    radial-gradient(32rem 30rem at 96% 10%, rgba(0, 165, 230, 0.18), transparent 65%),
+    rgba(234, 244, 255, 0.94);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+body[data-theme='dark'] .dialog-scrim {
+  background:
+    radial-gradient(34rem 28rem at 8% 4%, rgba(170, 65, 175, 0.2), transparent 68%),
+    radial-gradient(32rem 30rem at 96% 10%, rgba(0, 165, 230, 0.15), transparent 65%),
+    rgba(11, 8, 19, 0.95);
+}
+
+.create-conversation-dialog {
+  position: relative;
+  width: min(100%, 440px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 28px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+}
+
+body[data-theme='dark'] .create-conversation-dialog {
+  background: rgba(23, 16, 38, 0.96);
+}
+
+.create-conversation-dialog:focus {
+  outline: none;
+}
+
+.create-conversation-dialog .dialog-title:focus {
+  outline: none;
+}
+
+.dialog-title {
   margin: 0;
-  padding: 0 6px;
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+}
+
+.dialog-lead {
+  margin: 0;
+}
+
+/* Failed attempt (task 3.7): stated in words, on the danger tint, with the
+   server's own reason kept as the quieter detail line. */
+.dialog-error {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--danger-line);
+  border-radius: 12px;
+  background: var(--danger-bg);
+}
+
+.dialog-error-title {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.dialog-error-detail {
+  margin: 0;
+}
+
+.dialog-status {
+  margin: 0;
+}
+
+.dialog-candidates {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* Option tile, carried over from the one-shot's identity options. The
+   in-flight status word (task 3.8) sits in the trailing column. */
+.dialog-candidate {
+  width: 100%;
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--ink);
+  background: var(--blue-soft);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  cursor: pointer;
+  transition:
+    background-color 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    transform 0.18s var(--ease);
+}
+
+.dialog-candidate:hover:not(:disabled) {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  transform: translateX(2px);
+}
+
+body[data-theme='dark'] .dialog-candidate {
+  background: var(--paper);
+}
+
+.dialog-candidate:disabled {
+  color: var(--ink-3);
+  cursor: progress;
+}
+
+.dialog-candidate-name {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog-candidate-status {
+  white-space: nowrap;
+}
+
+/* Exhausted directory (task 3.5): words, not an empty list. */
+.dialog-empty {
+  margin: 0;
+  padding: 16px;
+  color: var(--ink-2);
+  background: var(--blue-soft);
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.dialog-cancel {
+  width: 100%;
+}
+
+.shell-body {
+  display: grid;
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  column-gap: 10px;
+  min-height: 0;
+  padding: 10px;
+}
+
+/* Raised panel: the shared border/shadow of both workspace columns. */
+.card {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+/* ── Rail (tasks 2.2, 2.6) ──────────────────────────────────────────── */
+
+.rail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 18px 10px 10px 18px;
+  background: rgba(244, 249, 255, 0.9);
+}
+
+body[data-theme='dark'] .rail {
+  background: rgba(18, 12, 31, 0.94);
+}
+
+/* Heading row (task 3.5): the rail title and, at its end, the `+` creation
+   control. The title's own rule below keeps its pre-control metrics for any
+   heading that has no control. */
+.rail-heading {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rail-heading .rail-title {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  border-bottom: 0;
+}
+
+.rail-heading .rail-new {
+  flex: none;
+}
+
+.rail-title {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.rail-loading {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
 }
 
 .rail-status {
   margin: 0;
-  padding: 0 6px;
+  padding: 10px 14px;
+}
+
+.rail-error,
+.thread-error,
+.gate-error {
+  display: grid;
+  gap: 6px;
+  margin: 10px 14px;
+  padding: 12px;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-line);
+  border-radius: 12px;
+}
+
+/* Successively quieter error copy: the headline says what broke, the meta
+   detail carries the raw reason for the demo. */
+.rail-error-title,
+.thread-error-title,
+.gate-error-title {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.gate-error {
+  margin: 20px 0 0;
 }
 
 .conversation-list {
-  list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 8px;
+  list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 9px;
-}
-
-.conversation-tile {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  min-height: 64px;
-  padding: 14px 18px;
-  background: var(--surface-2);
-  color: var(--ink);
-  border: 1px solid var(--stroke);
-  border-radius: var(--r-md);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background-color 0.2s var(--ease),
-    border-color 0.2s var(--ease),
-    transform 0.3s var(--ease);
-}
-
-.conversation-tile:hover {
-  background: var(--surface-solid);
-  border-color: var(--stroke-strong);
-  transform: translateY(-2px);
-}
-
-.conversation-tile:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 4px var(--chip);
-  border-color: var(--brand);
-}
-
-.conversation-tile--active {
-  background: var(--nav-active);
-  border-color: var(--stroke-strong);
-}
-
-.conversation-name {
-  font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rail-loading {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  gap: 5px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
 }
 
 .conversation-skeleton {
-  height: 64px;
-  border-radius: var(--r-md);
-  background: var(--chip);
-  border: 1px solid var(--stroke);
-  animation: skeleton-pulse 1.4s var(--ease) infinite;
+  width: 100%;
+  flex: none;
 }
 
-.rail-error {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 0 6px;
-}
-
-.rail-error-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--danger);
-}
-
-.rail-error-detail {
-  margin: 0;
-}
-
-.rail-retry {
-  height: 44px;
-  padding: 0 20px;
-}
-
-/* ---------- Thread pane (task 5.3) ---------- */
-
-/* The pane keeps the card's glass but zeroes its padding so the header and
-   the scroll region can run edge to edge; radius is preserved by clipping. */
-.thread-pane {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding: 0;
-  overflow: hidden;
-}
-
-.thread-header {
-  display: flex;
+.conversation-tile {
+  position: relative;
+  width: 100%;
+  min-height: 58px;
+  display: grid;
+  /* Third `auto` column hosts the optional presence mark (task 5.5). */
+  grid-template-columns: 36px minmax(0, 1fr) auto;
   align-items: center;
-  min-height: 64px;
-  padding: 0 26px;
-  border-bottom: 1px solid var(--stroke);
+  gap: 10px;
+  padding: 6px 8px;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    transform 0.18s var(--ease);
 }
 
-.thread-header .title {
-  margin: 0;
+.conversation-tile:hover {
+  background: var(--paper);
+  border-color: var(--line);
+  transform: translateX(1px);
+}
+
+body[data-theme='dark'] .conversation-tile:hover {
+  background: var(--blue-soft);
+}
+
+/* Active conversation: paper tile plus a gradient edge marker — the marker is
+   the second, non-colour selection cue (never colour alone in this shell). */
+.conversation-tile--active {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  box-shadow: 0 9px 22px -18px rgba(42, 78, 122, 0.75);
+}
+
+body[data-theme='dark'] .conversation-tile--active {
+  background: var(--paper);
+}
+
+.conversation-tile--active::before {
+  content: '';
+  position: absolute;
+  inset: 8px auto 8px -2px;
+  width: 4px;
+  border-radius: 8px;
+  background: var(--brand-gradient);
+}
+
+.conversation-copy {
+  /* Second grid column: min-width so the name/preview ellipsis below has a
+     bounded line to truncate against. */
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.conversation-name {
+  display: block;
   overflow: hidden;
+  font-size: 14px;
+  font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Rail preview (tasks 4.2–4.3): one muted line under the name, truncating
+   exactly like the one-shot design's `.conversation-preview`. */
+.conversation-preview {
+  display: block;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Thread (tasks 2.3, 2.8) ────────────────────────────────────────── */
+
+.thread-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 10px 18px 18px 10px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+body[data-theme='dark'] .thread-pane {
+  background: rgba(23, 16, 38, 0.94);
+}
+
+.thread-header {
+  flex: none;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+body[data-theme='dark'] .thread-header {
+  background: rgba(23, 16, 38, 0.84);
+}
+
+.thread-header > .avatar,
+.thread-inspector-toggle {
+  flex: none;
+}
+
+/* Name + supporting line. `flex: 1` absorbs the space so the inspector
+   control hugs the far edge. */
+.thread-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.thread-title {
+  font-size: 17px;
+  line-height: 1.15;
+}
+
+.thread-subtitle {
+  margin: 2px 0 0;
+  color: var(--ink-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* The scroll container (task 2.8: bottom-anchoring lives here). No smooth
+   scroll: positioning is instant, so the anchor can never fight the reader
+   or animate when it must not. */
 .thread-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px clamp(16px, 3vw, 34px) 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.66)),
+    radial-gradient(24rem 18rem at 0% 100%, rgba(170, 65, 175, 0.08), transparent 74%),
+    radial-gradient(22rem 16rem at 100% 0%, rgba(0, 165, 230, 0.09), transparent 72%);
 }
 
-/* Message region: content capped at 860px and centered (DESIGN.md, Thread
-   column), 24px 34px padding on desktop. */
+body[data-theme='dark'] .thread-scroll {
+  background:
+    linear-gradient(rgba(11, 8, 19, 0.7), rgba(11, 8, 19, 0.7)),
+    radial-gradient(24rem 18rem at 0% 100%, rgba(170, 65, 175, 0.13), transparent 74%),
+    radial-gradient(22rem 16rem at 100% 0%, rgba(0, 165, 230, 0.1), transparent 72%);
+}
+
+/* Conversations read bottom-up: the region is bottom-justified, so a short
+   history hugs the composer instead of floating mid-pane. */
 .thread-region {
-  max-width: 860px;
-  margin-inline: auto;
-  padding: 24px 34px;
-}
-
-.thread-region--center {
   min-height: 100%;
-  display: grid;
-  place-items: center;
-  text-align: center;
-}
-
-.thread-status {
-  margin: 0 0 14px;
-  text-align: center;
-}
-
-.thread-empty {
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
+}
+
+/* Error and empty-history states centre themselves instead of hugging the
+   bottom edge. */
+.thread-region--center {
+  justify-content: center;
   align-items: center;
-  gap: 9px;
 }
 
-.thread-empty .title,
-.thread-empty .meta {
-  margin: 0;
-}
-
-.thread-error {
+.message-list {
+  width: min(100%, 760px);
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 14px;
 }
 
-.thread-error-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--danger);
-}
-
-.thread-error-detail {
-  margin: 0;
-}
-
-.thread-retry {
-  height: 44px;
-  padding: 0 20px;
-}
-
-/* Message list: spacing does the grouping — 18px between senders, 4px
-   between consecutive bubbles of one sender (DESIGN.md, Thread rhythm). */
-.message-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* Task 2.3: calendar-day dividers, hairline-flanked. */
+.date-divider {
   display: flex;
-  flex-direction: column;
-  gap: 18px;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
+.date-divider::before,
+.date-divider::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+}
+
+/* One sender's run of messages. Authorship is carried by alignment AND by the
+   sender-label row (received only), never by colour alone (task 2.3). */
 .message-group {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  margin: 0;
+  padding: 6px 0;
 }
 
 .message-group--own {
@@ -728,192 +1131,1018 @@ body::before {
 }
 
 .message-sender {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 9px;
-  margin-bottom: 4px;
+  gap: 8px;
+  margin: 0 0 6px 2px;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 800;
 }
 
-/* Names carry the display face (Display-Is-For-People). */
 .message-sender-name {
-  font-family: var(--font-display);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Own words get the single saturated fill; the other side is neutral glass.
-   Bubbles sit flat in the room: a hairline plus the bubble-rest whisper, never
-   the pane shadow (Thread-Is-Flat). Cap min(72ch, 68%) so the left/right
-   authorship read stays unambiguous. */
 .message-bubble {
+  max-width: min(72ch, 76%);
   margin: 0;
-  max-width: min(72ch, 68%);
-  padding: 10px 14px;
-  border-radius: var(--r-md);
-  font-size: 15px;
-  line-height: 1.5;
-  white-space: pre-wrap;
+  padding: 9px 13px;
+  color: var(--ink);
+  background: var(--blue-soft);
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  box-shadow: 0 2px 5px -4px rgba(42, 78, 122, 0.45);
+  font-size: 14px;
+  line-height: 1.48;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .message-bubble--own {
-  background: var(--bubble-own);
-  color: #ffffff;
+  color: #fff;
+  background: var(--own);
+  border-color: transparent;
 }
 
-.message-bubble--other {
-  background: var(--surface);
-  border: 1px solid var(--stroke);
-  color: var(--ink);
-  box-shadow: 0 1px 2px -1px rgba(90, 45, 120, 0.18);
-}
-
-@media (prefers-color-scheme: dark) {
-  .message-bubble--other {
-    box-shadow: none;
-  }
-}
-
-/* The One Asymmetric Corner Rule: only the group's last bubble takes the 6px
-   corner nearest its author's edge. */
-.message-bubble--corner-own {
-  border-bottom-right-radius: 6px;
-}
-
+/* The run's LAST bubble gets the "tail" corner; earlier bubbles in the run
+   stay fully rounded. */
 .message-bubble--corner-other {
-  border-bottom-left-radius: 6px;
+  border-bottom-left-radius: 5px;
 }
 
-/* Meta lives outside the bubble, below it, 12px ink-3 (Message-Reads-First). */
-.message-meta {
-  margin-top: 4px;
+.message-bubble--corner-own {
+  border-bottom-right-radius: 5px;
 }
 
-.message-skeleton {
-  width: 45%;
-  height: 44px;
-  border-radius: var(--r-md);
-  background: var(--chip);
-  border: 1px solid var(--stroke);
-  animation: skeleton-pulse 1.4s var(--ease) infinite;
-}
-
-.message-skeleton--own {
-  align-self: flex-end;
-  width: 60%;
-  background: var(--surface-2);
-}
-
-/* Pending bubbles (task 6.3): own-style fill, subdued via a static opacity so
-   the optimistic state reads at a glance without any motion — the explicit
-   status word beside it carries the state for screen readers. */
+/* Pending (optimistic) and failed states. Pending is dimmed in place; a
+   failed bubble keeps its content visible and states the failure in words
+   below — never removed, never auto-retried (task 6.4 posture). */
 .message-bubble--pending {
-  opacity: 0.55;
+  opacity: 0.58;
+  font-style: italic;
+}
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 20px;
+  margin: 3px 3px 0;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .message-meta--failed {
   color: var(--danger);
+  font-weight: 800;
 }
 
-/* ---------- Composer (task 6.3) ---------- */
-
-/* Anchored to the pane's bottom edge, separated from the thread by the same
-   hairline as the header; background keeps glass language per the recipe. */
-.composer {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  padding: 14px 26px;
-  border-top: 1px solid var(--stroke);
-  background: var(--surface-2);
-}
-
-.composer-input {
-  flex: 1;
+.message-skeleton {
+  width: 62%;
+  height: 44px;
   min-height: 44px;
-  max-height: 132px;
-  padding: 10px 14px;
-  background: var(--surface-solid);
-  color: var(--ink);
-  border: 1px solid var(--stroke);
-  border-radius: var(--r-md);
-  font: inherit;
-  font-size: 15px;
-  line-height: 1.5;
-  resize: none;
+  border-radius: 15px;
 }
 
-.composer-input::placeholder {
+.message-skeleton--own {
+  align-self: flex-end;
+}
+
+/* No conversation selected: the whole pane is the empty state. */
+.thread-pane > .thread-empty {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  justify-items: center;
+  padding: 28px;
+  text-align: center;
+}
+
+/* Empty-history note inside a selected thread. */
+.thread-region .thread-empty {
+  padding: 24px;
+  text-align: center;
+}
+
+.thread-empty .title {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.thread-status {
+  margin: 0 0 10px;
+}
+
+/* ── In-thread connection banner + recovery line (slice 5, tasks 6.3–6.4) ──
+   Sits between the thread header and the message region, mirroring the
+   one-shot design: warn tint while unavailable — saying what is wrong AND
+   what is being done about it, plus the "Reconnect now" control — and an
+   ok tint for the transient recovery confirmation, which withdraws itself
+   on the shell's timer. Words carry the state; tint and dot are second
+   signals only (Status-Is-Text). */
+.thread-connection {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 18px;
+  padding: 10px 14px;
+  border: 1px solid var(--warn-line);
+  border-radius: 12px;
+  background: var(--warn-bg);
+}
+
+.thread-connection--restored {
+  border-color: var(--ok-line);
+  background: var(--ok-bg);
+}
+
+.thread-connection-copy {
+  margin: 0;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.thread-connection-copy strong {
+  font-weight: 800;
+}
+
+.thread-connection-detail {
   color: var(--ink-3);
 }
 
-.composer-input:focus-visible {
-  border-color: var(--stroke-strong);
+.thread-connection-retry {
+  flex: none;
 }
 
-/* The one saturated action in the pane: same fill as the author's bubbles. */
+/* Retry control on a rejected bubble (slice 5, task 6.8). A quiet text
+   button under the meta word: the failure is stated in words first, and the
+   control is the ONLY path back for a rejected message (never automatic). */
+.message-retry {
+  align-self: flex-start;
+  margin: 4px 3px 0;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  color: var(--danger);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.message-retry:hover,
+.message-retry:focus-visible {
+  color: var(--ink);
+}
+
+/* ── Composer (task 2.4) ────────────────────────────────────────────── */
+
+.composer {
+  flex: none;
+  padding: 10px 12px 12px;
+  background: rgba(244, 249, 255, 0.94);
+  border-top: 1px solid var(--line);
+}
+
+body[data-theme='dark'] .composer {
+  background: rgba(18, 12, 31, 0.95);
+}
+
+/* The pill: textarea and send button share one bordered surface, echoing a
+   single message field rather than two adjacent controls. */
+.composer-box {
+  width: min(100%, 800px);
+  min-height: 54px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: end;
+  gap: 8px;
+  padding: 4px;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 15px;
+  box-shadow:
+    inset 0 1px 3px rgba(42, 78, 122, 0.07),
+    0 7px 24px -20px rgba(42, 78, 122, 0.7);
+  transition:
+    border-color 0.18s var(--ease),
+    box-shadow 0.18s var(--ease);
+}
+
+.composer-box:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 4px rgba(152, 91, 156, 0.15);
+}
+
+.composer-input {
+  width: 100%;
+  /* `MAX_COMPOSER_HEIGHT_PX` in Composer.tsx mirrors this cap — the CSS is
+     the ultimate authority, the constant only avoids growing past it. */
+  max-height: 132px;
+  min-height: 44px;
+  padding: 10px 8px 8px 10px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  resize: none;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.composer-input::placeholder {
+  color: #61758c;
+  opacity: 1;
+}
+
+body[data-theme='dark'] .composer-input::placeholder {
+  color: var(--ink-3);
+}
+
+/* The send affordance carries the brand gradient (its one licensed use on a
+   control). Disabled = submission unavailable (task 2.4): the button is
+   greyed AND the submit path no-ops on a blank draft. */
 .composer-send {
+  width: 44px;
   height: 44px;
-  background: var(--bubble-own);
-  color: #ffffff;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: #fff;
+  background: var(--brand-gradient);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  box-shadow: 0 9px 20px -12px rgba(60, 105, 200, 0.9);
+  cursor: pointer;
+  transition:
+    transform 0.18s var(--ease),
+    opacity 0.18s var(--ease),
+    filter 0.18s var(--ease);
 }
 
 .composer-send:hover:not(:disabled) {
   transform: translateY(-2px);
+  filter: saturate(1.12);
+}
+
+.composer-send:focus-visible {
+  outline-offset: 2px;
 }
 
 .composer-send:disabled {
-  opacity: 0.45;
+  opacity: 0.36;
+  filter: grayscale(0.4);
+  box-shadow: none;
   cursor: not-allowed;
 }
 
-/* Narrow viewports: rail stacks above the thread; thread padding drops to
-   18px and bubbles cap at 82% (DESIGN.md, Responsive). */
-@media (max-width: 720px) {
-  .shell-body {
-    grid-template-columns: 1fr;
-  }
+/* Small print under the pill, mirroring the reference layout's right-aligned
+   keyboard-shortcut reminder. */
+.composer-hint {
+  width: min(100%, 800px);
+  margin: 5px auto 0;
+  color: var(--ink-3);
+  font-size: 11px;
+  text-align: right;
+}
 
-  .thread-region {
-    padding: 18px;
-  }
+/* ── Identity gate (the 5.1 surface, re-skinned to the same system) ─── */
 
-  .thread-header {
-    padding: 0 18px;
-  }
+.gate {
+  height: 100svh;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  padding: 22px;
+}
 
-  .composer {
-    padding: 12px 18px;
-  }
+.gate-card {
+  width: min(100%, 440px);
+  padding: 28px;
+  display: grid;
+  justify-items: start;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: 0 30px 70px -38px rgba(42, 78, 122, 0.62);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
 
-  .message-bubble {
-    max-width: 82%;
+body[data-theme='dark'] .gate-card {
+  background: rgba(23, 16, 38, 0.96);
+}
+
+.gate-card > .brand-mark {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 20px;
+  border-radius: 11px;
+}
+
+.gate-greeting {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+}
+
+.gate-subcopy {
+  margin: 9px 0 0;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+
+.identity-loading {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  margin-top: 24px;
+}
+
+.identity-list {
+  width: 100%;
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.identity-tile {
+  width: 100%;
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  color: var(--ink);
+  text-align: left;
+  background: var(--blue-soft);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  cursor: pointer;
+  transition:
+    background-color 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    transform 0.18s var(--ease);
+}
+
+.identity-tile:hover {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  transform: translateX(2px);
+}
+
+body[data-theme='dark'] .identity-tile {
+  background: var(--paper);
+}
+
+.identity-name {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+/* ── Inspector drawer (slice 6, tasks 7.4–7.9) ────────────────────────
+   Visual source: docs/one-shot/oneshot-info-drawer.html's `info` panel —
+   brand-gradient top strip, lifecycle timeline, fact rows, wire frames, and
+   the caveat strip — carried onto this shell's class names. Two
+   presentations, one component (task 7.5): DOCKED beside the thread at and
+   above 980px (the shell adds the third grid column), OVERLAID with a scrim
+   below it (fixed to the right edge). Crossing the threshold never unmounts
+   the drawer, so the inspected message is retained by construction. */
+
+:root {
+  --inspector-width: 338px;
+}
+
+@media (max-width: 1180px) {
+  :root {
+    --inspector-width: 314px;
   }
 }
 
-/* ---------- Reduced motion: resolve to end states ---------- */
+/* Docked: the shell body gains the drawer's column. */
+.shell-body--inspector-open {
+  grid-template-columns: var(--rail-width) minmax(0, 1fr) var(--inspector-width);
+}
 
-@media (prefers-reduced-motion: reduce) {
-  body::before {
-    animation: none;
+.inspector-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 10px;
+  background: rgba(244, 249, 255, 0.94);
+}
+
+body[data-theme='dark'] .inspector-panel {
+  background: rgba(18, 12, 31, 0.96);
+}
+
+/* The brand strip identifies the panel, as on the one-shot. */
+.inspector-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--brand-gradient);
+}
+
+/* Overlaid below the 980px threshold: fixed to the right edge over the
+   thread (the shell renders the scrim). In docked mode this class is absent
+   and the panel is an ordinary grid child. */
+.inspector-panel--overlay {
+  position: fixed;
+  top: var(--header-height);
+  right: 10px;
+  bottom: 10px;
+  z-index: 70;
+  width: min(88vw, 352px);
+  border-radius: 18px;
+  box-shadow: -24px 0 60px -34px rgba(42, 78, 122, 0.7);
+}
+
+body[data-theme='dark'] .inspector-panel--overlay {
+  box-shadow: -24px 0 60px -30px rgba(0, 0, 0, 0.9);
+}
+
+.inspector-head {
+  flex: none;
+  padding: 15px 16px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.inspector-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.inspector-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.inspector-close {
+  flex: none;
+  min-width: 38px;
+  min-height: 38px;
+  border-radius: 10px;
+}
+
+.inspector-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 16px 22px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.inspector-section {
+  padding-top: 16px;
+}
+
+.inspector-section + .inspector-section {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.inspector-section-title {
+  margin: 0 0 10px;
+  color: var(--ink-3);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Subject — which message this record belongs to. */
+.inspector-subject {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+body[data-theme='dark'] .inspector-subject {
+  background: var(--blue-soft);
+}
+
+.inspector-subject-who {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.inspector-subject-text {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Lifecycle timeline. The node colour is a SECOND signal — the state word
+   sits in the label/note text (Status-Is-Text). */
+.inspector-step-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inspector-step {
+  position: relative;
+  padding: 0 0 16px 24px;
+}
+
+.inspector-step::before {
+  content: '';
+  position: absolute;
+  top: 15px;
+  bottom: 1px;
+  left: 5px;
+  width: 1px;
+  background: var(--line);
+}
+
+.inspector-step:last-child {
+  padding-bottom: 0;
+}
+
+.inspector-step:last-child::before {
+  display: none;
+}
+
+.inspector-step-node {
+  position: absolute;
+  left: 1px;
+  top: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent);
+}
+
+.inspector-step[data-state='failed'] .inspector-step-node {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+.inspector-step[data-state='waiting'] .inspector-step-node,
+.inspector-step[data-state='unverified'] .inspector-step-node {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  box-shadow: none;
+}
+
+.inspector-step-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inspector-step-label {
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.inspector-step[data-state='waiting'] .inspector-step-label,
+.inspector-step[data-state='unverified'] .inspector-step-label {
+  color: var(--ink-3);
+}
+
+.inspector-step[data-state='failed'] .inspector-step-label {
+  color: var(--danger);
+}
+
+.inspector-step-stamp {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 10px;
+}
+
+.inspector-step-note {
+  margin: 3px 0 0;
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* Fact rows: label above a mono value; an unobserved value is ABSENT (muted
+   dash), never fabricated (task 7.8). */
+.inspector-fact-list {
+  margin: 0;
+}
+
+.inspector-fact + .inspector-fact {
+  margin-top: 10px;
+}
+
+.inspector-fact-label {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.inspector-fact-value {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.inspector-fact-value--absent {
+  color: var(--ink-3);
+}
+
+.inspector-fact-note {
+  margin: 3px 0 0;
+  color: var(--ink-3);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+/* The missing-record statement (task 7.8): stated, not dashed. */
+.inspector-absent {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  color: var(--ink-2);
+  background: var(--blue-soft);
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0 10px 10px 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Wire frames: name chip over the exact payload as it crossed the wire. */
+.inspector-frame + .inspector-frame {
+  margin-top: 10px;
+}
+
+.inspector-frame {
+  margin-top: 10px;
+}
+
+.inspector-frame-name {
+  display: inline-block;
+  margin-bottom: 5px;
+  padding: 2px 7px;
+  color: var(--brand-ink);
+  background: #f3eaf5;
+  border: 1px solid #dbc5df;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+body[data-theme='dark'] .inspector-frame-name {
+  color: #e2c9e9;
+  background: #2c1c34;
+  border-color: #5e3b68;
+}
+
+.inspector-frame-json {
+  margin: 0;
+  padding: 10px;
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+body[data-theme='dark'] .inspector-frame-json {
+  background: var(--blue-soft);
+}
+
+/* The honesty caveat strip (task 7.8). */
+.inspector-caveat {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  color: var(--ink-2);
+  background: var(--blue-soft);
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0 10px 10px 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.inspector-empty {
+  min-height: 140px;
+  display: grid;
+  place-items: center;
+  padding: 24px 8px;
+  color: var(--ink-3);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* The ⓘ affordance beside every message (task 7.4), including own pending
+   ones. Pointer devices get a quiet glyph that the row reveals and the
+   button confirms; touch keeps it legible. */
+.message-item {
+  width: fit-content;
+  max-width: min(76%, calc(72ch + 44px));
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.message-group--own .message-item {
+  flex-direction: row-reverse;
+}
+
+/* Breathing room between consecutive bubbles within one sender's run — they
+   otherwise stack flush against each other. */
+.message-item + .message-item {
+  margin-top: 5px;
+}
+
+.message-item .message-bubble {
+  flex: 0 1 auto;
+  min-width: 0;
+  /* The width clamp lives on the item (which must also fit the ⓘ button). */
+  max-width: none;
+}
+
+/* The inspected message is visually distinguished (spec "Inspecting a
+   message distinguishes it") — a brand ring around its bubble. */
+.message-item--inspected .message-bubble {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 42%, transparent);
+}
+
+.info-button {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--ink-3);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    opacity 0.18s var(--ease);
+}
+
+.info-button::before {
+  content: '';
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: var(--blue-mist);
+  opacity: 0;
+  transform: scale(0.55);
+  transition:
+    opacity 0.18s var(--ease),
+    transform 0.24s var(--ease),
+    border-color 0.18s var(--ease);
+}
+
+.info-button .icon {
+  position: relative;
+  width: 16px;
+  height: 16px;
+}
+
+/* On pointer devices the ⓘ stays hidden and is revealed only when the reader
+   hovers (or keyboard-focuses) the message. Touch devices have no hover, so the
+   glyph keeps its default visibility there. Focus-visible and the expanded
+   state below still force it fully visible, so keyboard users never lose it. */
+@media (hover: hover) {
+  .info-button {
+    opacity: 0;
   }
 
-  .identity-skeleton,
-  .conversation-skeleton,
-  .message-skeleton {
-    animation: none;
-    opacity: 0.6;
+  .message-item:hover .info-button {
+    opacity: 0.85;
+  }
+}
+
+.info-button:hover,
+.info-button:focus-visible,
+.info-button[aria-expanded='true'] {
+  opacity: 1;
+  color: var(--brand-ink);
+}
+
+.info-button:hover::before,
+.info-button:focus-visible::before,
+.info-button[aria-expanded='true']::before {
+  opacity: 1;
+  transform: scale(1);
+  background: #f3eaf5;
+  border-color: #cdaed3;
+}
+
+body[data-theme='dark'] .info-button:hover::before,
+body[data-theme='dark'] .info-button:focus-visible::before,
+body[data-theme='dark'] .info-button[aria-expanded='true']::before {
+  background: #2c1c34;
+  border-color: #5e3b68;
+}
+
+/* The thread-header inspector control reads active while its panel is open. */
+.thread-inspector-toggle[aria-expanded='true'] {
+  color: var(--brand-ink);
+  background: #f6edf8;
+  border-color: #cdaed3;
+}
+
+body[data-theme='dark'] .thread-inspector-toggle[aria-expanded='true'] {
+  background: #2c1c34;
+  border-color: #5e3b68;
+}
+
+/* Mono numerals/ids inside the drawer. */
+.data {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* ── Presence (task 5.5): dot plus WORD, in both states ─────────────── */
+/* Status-Is-Text: the uppercase word is the state's carrier — for sighted
+   users and assistive technology alike — and the dot is colour behind the
+   word, never instead of it. The word is visible at every width: a status
+   that disappears on narrow viewports is colour-alone by another name. */
+
+.presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 3px;
+  color: var(--ink-3);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.presence-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.presence[data-state='online'] .presence-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent);
+}
+
+.presence-text {
+  flex: none;
+}
+
+/* ── Compact viewport: the rail becomes a slide-over drawer (task 2.6) ─ */
+
+@media (max-width: 1020px) {
+  :root {
+    --rail-width: 196px;
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --header-height: 62px;
+  }
+
+  .app-header {
+    padding: 0 8px;
+  }
+
+  .app-header-user {
+    gap: 5px;
+  }
+
+  .user-chip {
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+
+  .user-chip-name {
+    display: none;
+  }
+
+  /* The rail leaves the layout grid and parks off-canvas. React still owns
+     the real open/closed truth (`rail--open` + `inert`), so focus and
+     assistive-tech behaviour never depend on the CSS transform. */
+  .shell-body {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0;
+  }
+
+  .card.thread-pane {
+    border: 0;
+    border-radius: 0;
+  }
+
+  .rail {
+    position: fixed;
+    top: var(--header-height);
+    bottom: 0;
+    left: 0;
+    z-index: 70;
+    width: min(82vw, 290px);
+    border-radius: 0 18px 18px 0;
+    transform: translateX(-104%);
+    transition: transform 0.28s var(--ease);
+    box-shadow: -24px 0 60px -34px rgba(42, 78, 122, 0.7);
+  }
+
+  body[data-theme='dark'] .rail {
+    box-shadow: -24px 0 60px -30px rgba(0, 0, 0, 0.9);
+  }
+
+  .rail--open {
+    transform: translateX(0);
+  }
+
+  .thread-header {
+    padding-inline: 12px;
+  }
+
+  .thread-subtitle {
+    display: none;
+  }
+
+  .thread-scroll {
+    padding-inline: 13px;
+  }
+
+  .message-bubble {
+    max-width: 88%;
+  }
+
+  .composer {
+    padding: 8px;
+  }
+
+  .composer-hint {
+    display: none;
   }
 
   .connection-status-pill {
-    animation: none;
+    max-width: 36vw;
   }
+}
 
-  .btn,
-  .identity-tile,
-  .conversation-tile,
-  body {
-    transition: none;
+/* Task 2.7: honour the OS reduced-motion preference. The blanket switch covers
+   every transition and keyframe this file defines — shimmer skeletons, the
+   warn-pill pulse, the slide-over — plus anything a later slice adds.
+   Deliberate positioning changes (the thread's bottom anchor, the drawer's
+   end state) are unaffected: instant, not animated. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }

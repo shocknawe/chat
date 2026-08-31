@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchConversations, fetchUsers, type User } from './api'
+import {
+  createConversation,
+  fetchConversations,
+  fetchUsers,
+  type Conversation,
+  type User,
+} from './api'
 import {
   clearStoredConversationId,
   clearStoredUserId,
@@ -10,15 +16,33 @@ import {
   storeUserId,
 } from './identity'
 import { ConnectionStatus } from './components/ConnectionStatus'
-import { ConversationList } from './components/ConversationList'
+import { ConversationList, conversationLabel } from './components/ConversationList'
+import { CreateConversationDialog } from './components/CreateConversationDialog'
+import { InspectorDrawer } from './components/InspectorDrawer'
 import { ThreadPane } from './components/ThreadPane'
 import { UserSelectScreen } from './components/UserSelectScreen'
+import { useAnnouncer } from './hooks/useAnnouncer'
 import { useChatSocket } from './hooks/useChatSocket'
-import { usePendingMessages } from './hooks/usePendingMessages'
+import { COMPACT_QUERY, INSPECTOR_OVERLAY_QUERY, useMediaQuery } from './hooks/useMediaQuery'
+import { type PendingMessage, usePendingMessages } from './hooks/usePendingMessages'
+import { useTheme } from './hooks/useTheme'
+import { useTransportLedger } from './hooks/useTransportLedger'
+import {
+  sameMessageKey,
+  type InspectMessageKey,
+  type InspectTarget,
+} from './inspector/transportLedger'
 import { initials } from './initials'
-import { upsertAuthoritativeMessage } from './messagesCache'
+import { patchConversationPreview, upsertAuthoritativeMessage } from './messagesCache'
 import { queryClient } from './queryClient'
-import type { ConnectionState, ErrorEvent, MessageAckEvent, NewMessageEvent } from './realtime'
+import type {
+  ConversationCreatedEvent,
+  ConnectionState,
+  ErrorEvent,
+  MessageAckEvent,
+  NewMessageEvent,
+  PresenceEvent,
+} from './realtime'
 
 /**
  * Root component: establishes the window-scoped current user before any
@@ -30,10 +54,17 @@ import type { ConnectionState, ErrorEvent, MessageAckEvent, NewMessageEvent } fr
  * longer matches a configured user is discarded and the selection screen
  * shows again. Once established, the signed-in shell mounts the conversation
  * rail (task 5.2) and, later, the message thread (tasks 5.3–5.4).
+ *
+ * Accessibility announcer (task 2.7): one polite live region lives here,
+ * above the identity gate, because `SignedInShell` below is fully remounted
+ * (via its `user.id` key) on every identity switch — a live region owned by
+ * it would be torn down at exactly the moment it needs to announce the
+ * switch that just happened.
  */
 function App() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(() => readStoredUserId())
   const usersQuery = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
+  const { announcement, announce } = useAnnouncer()
 
   const users = usersQuery.data
   const currentUser = users?.find((user) => user.id === selectedUserId) ?? null
@@ -52,6 +83,7 @@ function App() {
   const handleSelect = (user: User) => {
     storeUserId(user.id)
     setSelectedUserId(user.id)
+    announce(`Signed in as ${user.displayName}`)
   }
 
   const handleSwitchUser = () => {
@@ -59,25 +91,59 @@ function App() {
     setSelectedUserId(null)
   }
 
-  if (currentUser === null) {
-    return (
-      <UserSelectScreen
-        users={users}
-        isPending={usersQuery.isPending}
-        error={usersQuery.error}
-        onRetry={() => void usersQuery.refetch()}
-        onSelect={handleSelect}
-      />
-    )
-  }
-
-  return <SignedInShell key={currentUser.id} user={currentUser} onSwitchUser={handleSwitchUser} />
+  return (
+    <>
+      {currentUser === null ? (
+        <UserSelectScreen
+          users={users}
+          isPending={usersQuery.isPending}
+          error={usersQuery.error}
+          onRetry={() => void usersQuery.refetch()}
+          onSelect={handleSelect}
+        />
+      ) : (
+        <SignedInShell key={currentUser.id} user={currentUser} onSwitchUser={handleSwitchUser} announce={announce} />
+      )}
+      {/* Task 2.7: conversation, identity, and delivery-status changes are
+          announced here — see the components above for where `announce` is
+          called for each. */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </div>
+    </>
+  )
 }
 
 interface SignedInShellProps {
   user: User
   onSwitchUser: () => void
+  announce: (message: string) => void
 }
+
+/**
+ * Presence starts EMPTY: before the socket's first PRESENCE snapshot arrives
+ * (the backend sends it as the connection's first event) no partner is known
+ * to be online, so "Offline" is the honest default — the rail renders it in
+ * words from the very first paint. Frozen to keep the initial state
+ * referentially stable across renders.
+ */
+const INITIAL_ONLINE_USER_IDS: ReadonlySet<string> = new Set()
+
+/**
+ * Slice 5 (task 6.4): how long the transient recovery confirmation stays in
+ * the conversation before withdrawing itself. Timer-based per design.md
+ * decision (resolved open question 4) — no user action is involved — and
+ * long enough to actually be read; the one-shot design withdraws the same
+ * banner, sooner, in its scripted demo.
+ */
+const RECOVERY_NOTICE_MS = 4000
+
+/**
+ * Every overlay the shell can present, exclusively one at a time (task 2.6
+ * established the mechanism; task 3.5 adds the creation dialog as its second
+ * member — opening one always replaces whatever was open rather than stacking).
+ */
+type OverlayId = 'rail' | 'new-conversation'
 
 /**
  * Chat app frame rendered once the current user is established: a
@@ -101,13 +167,222 @@ interface SignedInShellProps {
  * staleTime (0) refetches on mount regardless, so history is never served
  * stale across reloads.
  */
-function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
+function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
+  const { theme, toggleTheme } = useTheme()
+  const isCompact = useMediaQuery(COMPACT_QUERY)
+  // Slice 6 (task 7.5): the 980px threshold, driving the drawer's docked vs
+  // overlaid presentation. The flag feeds the DOM (dialog semantics, scrim,
+  // grid column), so a crossing re-presents the open drawer — never closes it.
+  const isInspectorOverlay = useMediaQuery(INSPECTOR_OVERLAY_QUERY)
+
+  // Slice 6 (task 7.2): the session-scoped transport ledger. Placement is the
+  // scoping: this hook lives under the shell's `user.id` key, so identity
+  // switches and reloads start empty — the boundary the drawer states in words.
+  const { ledger, observeQueued, observeSent, observeEvent } = useTransportLedger()
+
+  /**
+   * Slice 6 (tasks 7.3–7.6, 7.9): the info drawer's open state. `null` is
+   * closed; otherwise the target is one message's record or the connection/
+   * protocol view (the thread-header control's view). The state is
+   * presentation-agnostic: crossing the 980px threshold only changes HOW the
+   * drawer is presented, so the inspected message is retained by construction.
+   */
+  const [inspection, setInspection] = useState<{ target: InspectTarget } | null>(null)
+  /** The control that opened (or last re-targeted) the drawer. */
+  const inspectorOriginRef = useRef<HTMLElement | null>(null)
+  /** The thread-header inspector control — the focus-return fallback (7.6). */
+  const inspectorControlRef = useRef<HTMLButtonElement | null>(null)
+  /** Set when a close must restore focus once the drawer's DOM is gone. */
+  const inspectorFocusReturnRef = useRef(false)
+
+  // Task 2.6: exclusive overlay state; task 3.5 adds the creation dialog as
+  // its second member. Opening an overlay records WHERE focus must return on
+  // dismissal (task 3.6: the control that opened it); closing clears the
+  // overlay and performs that return.
+  const [openOverlay, setOpenOverlay] = useState<OverlayId | null>(null)
+  const railToggleRef = useRef<HTMLButtonElement>(null)
+  const newConversationRef = useRef<HTMLButtonElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
+
+  /** The control that opened the currently open overlay (its focus-return target). */
+  const returnFocusRef = useRef<HTMLElement | null>(null)
+  /**
+   * Where the deferred effect (below) must put focus once the closing/replaced
+   * DOM has committed. Dismissal (task 3.6) always targets the opening control;
+   * a SUCCESSFUL creation (task 3.7) targets the composer instead — the dialog
+   * closing after success is not a dismissal, and focus belongs on the textarea
+   * of the conversation just opened, not back on the `+`.
+   */
+  const pendingFocusRef = useRef<'return' | 'composer' | null>(null)
+  /**
+   * True while the open creation dialog was opened from the compact rail
+   * overlay's `+` control. Dismissing it must RE-PRESENT that rail overlay —
+   * the `+` control focus returns to lives in the rail heading, which is
+   * inert (off-canvas) while the compact rail is closed — and only then
+   * complete the focus return.
+   */
+  const dialogFromCompactRailRef = useRef(false)
+
+  const openRailOverlay = useCallback(() => {
+    // The overlay system stays mutually exclusive with the drawer (slice 6):
+    // focus moves with the rail/dialog, so the inspector closes silently.
+    setInspection(null)
+    returnFocusRef.current = railToggleRef.current
+    setOpenOverlay('rail')
+  }, [])
+
+  const openNewConversation = useCallback(() => {
+    setInspection(null)
+    returnFocusRef.current = newConversationRef.current
+    dialogFromCompactRailRef.current = isCompact
+    setOpenOverlay('new-conversation')
+  }, [isCompact])
+
+  const closeOverlay = useCallback(() => {
+    if (openOverlay === 'new-conversation' && dialogFromCompactRailRef.current) {
+      dialogFromCompactRailRef.current = false
+      setOpenOverlay('rail')
+    } else {
+      setOpenOverlay(null)
+    }
+    pendingFocusRef.current = 'return'
+  }, [openOverlay])
+
+  // Deferred focus move (task 3.6 dismissal / task 3.7 success). Runs as an
+  // effect so the target's DOM is committed first — on a compact viewport a
+  // dismissed creation dialog re-presents the rail slide-over, and its `+`
+  // control only becomes focusable once that commit (and ConversationList's
+  // `inert` effect) has run; a successful creation's composer may likewise be
+  // mounting in the very commit that removed the dialog.
+  useEffect(() => {
+    const pending = pendingFocusRef.current
+    if (pending === null) return
+    pendingFocusRef.current = null
+    if (pending === 'composer') {
+      composerRef.current?.focus()
+    } else {
+      returnFocusRef.current?.focus()
+    }
+  })
+
+  // Crossing above the compact threshold must not leave the rail overlay
+  // stranded mid-transition-state: it is no longer an overlay at all above
+  // the threshold, so the "open" flag is meaningless there. (The creation
+  // dialog stays open across the threshold: it is modal at every width.) A
+  // dialog opened from the compact rail also loses its "return to the rail
+  // slide-over" disposition, since the rail is no longer an overlay.
+  useEffect(() => {
+    if (!isCompact) {
+      dialogFromCompactRailRef.current = false
+      if (openOverlay === 'rail') {
+        setOpenOverlay(null)
+      }
+    }
+  }, [isCompact, openOverlay])
+
+  // Dismiss key (task 2.6).
+  useEffect(() => {
+    if (openOverlay === null) return
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        closeOverlay()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [openOverlay, closeOverlay])
+
+  /**
+   * Slice 6: the info drawer's state transitions.
+   *
+   * - Opening from a message's ⓘ records that control as the focus-return
+   *   target (task 7.6); activating the SAME message's ⓘ again toggles the
+   *   drawer closed (the one-shot design's behaviour).
+   * - The thread-header control toggles the drawer and always opens with NO
+   *   message selected — the connection/protocol view (spec: "Thread-header
+   *   control opens with no selection").
+   * - Closing always routes through the focus-returning path if the originator
+   *   still exists, else the thread-header control (task 7.6).
+   */
+  const closeInspector = useCallback(
+    (returnFocus: boolean) => {
+      if (returnFocus) inspectorFocusReturnRef.current = true
+      setInspection(null)
+      announce('Info closed')
+    },
+    [announce],
+  )
+
+  /** Close any open overlay WITHOUT the focus-return machinery — focus is about to move onto an inspector control. */
+  const dismissOverlaysSilently = useCallback(() => {
+    dialogFromCompactRailRef.current = false
+    setOpenOverlay(null)
+  }, [])
+
+  const handleInspectMessage = useCallback(
+    (key: InspectMessageKey, origin: HTMLElement) => {
+      dismissOverlaysSilently() // overlays are mutually exclusive (task 2.6)
+      const isSameTarget =
+        inspection?.target.kind === 'message' && sameMessageKey(inspection.target.key, key)
+      if (isSameTarget) {
+        // Toggle-close: focus is already ON the origin control, and the
+        // effect below re-centres it once the drawer's DOM is gone.
+        closeInspector(true)
+        return
+      }
+      inspectorOriginRef.current = origin
+      setInspection({ target: { kind: 'message', key } })
+      announce('Info opened')
+    },
+    [inspection, closeInspector, dismissOverlaysSilently, announce],
+  )
+
+  const handleToggleInspector = useCallback(() => {
+    if (inspection !== null) {
+      closeInspector(true)
+      return
+    }
+    dismissOverlaysSilently()
+    inspectorOriginRef.current = inspectorControlRef.current
+    setInspection({ target: { kind: 'connection' } })
+    announce('Info opened')
+  }, [inspection, closeInspector, dismissOverlaysSilently, announce])
+
+  // Deferred focus return (task 7.6): runs after the closing commit so the
+  // drawer's DOM is gone before focus lands. The originator wins while it
+  // still exists (task-7.9 acks/removals can take it away); otherwise focus
+  // falls back to the thread-header inspector control.
+  useEffect(() => {
+    if (!inspectorFocusReturnRef.current) return
+    inspectorFocusReturnRef.current = false
+    const origin = inspectorOriginRef.current
+    inspectorOriginRef.current = null
+    const target = origin !== null && document.contains(origin) ? origin : inspectorControlRef.current
+    target?.focus()
+  })
+
+  // Dismiss key for the drawer, in both presentations (the one-shot closes
+  // Info on Escape docked and overlaid alike). Mutually exclusive with the
+  // overlay Escape effect above: opening the inspector dismisses overlays.
+  useEffect(() => {
+    if (inspection === null) return
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeInspector(true)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [inspection, closeInspector])
+
   // Pending outbound items (task 6.3): optimistic messages with no server id
   // yet, held OUTSIDE the TanStack cache. State is lifted here — the common
   // ancestor of ThreadPane (renders it) and the socket handlers (6.4 mutates
   // it via `removePending`/`markPendingFailed`) — and is keyed to this
   // identity by the shell's `key`, so a user switch resets it automatically.
-  const { pendingMessages, addPending, removePending, markPendingFailed } = usePendingMessages()
+  const { pendingMessages, addPending, removePending, markPendingFailed, markPendingRetry } =
+    usePendingMessages()
 
   /**
    * Task 6.4 pending→authoritative reconciliation. The backend ack always
@@ -123,29 +398,56 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
    */
   const handleMessageAck = useCallback(
     (event: MessageAckEvent) => {
+      // Task 7.2: the acknowledgement is a ledger observation (step + frame).
+      observeEvent(event)
       removePending(event.clientMessageId)
       upsertAuthoritativeMessage(user.id, event.message)
+      // Task 4.4: the acknowledged message becomes the conversation's rail
+      // preview (cache patch, no listing refetch). With the pending item gone,
+      // the override retires and the row reads the server tail.
+      patchConversationPreview(user.id, event.message)
+      // Task 7.9: if the INSPECTED message is the one just acknowledged, re-key
+      // the open inspection to its server identity — the drawer keeps showing
+      // the record (now with server id/timestamp), it never closes on an ack.
+      setInspection((prev) =>
+        prev !== null &&
+        prev.target.kind === 'message' &&
+        prev.target.key.by === 'clientMessageId' &&
+        prev.target.key.clientMessageId === event.clientMessageId
+          ? { target: { kind: 'message', key: { by: 'id', messageId: event.message.id } } }
+          : prev,
+      )
+      // Task 2.7: delivery-status change, announced in words.
+      announce('Message sent')
     },
-    [removePending, user.id],
+    [removePending, user.id, announce, observeEvent],
   )
 
   /**
-   * Task 6.4 failure path: a correlated error (`clientMessageId` present)
-   * flips the matching pending item to `failed` — the bubble stays rendered
-   * with the "Failed to send" status, is never retried, and is never removed.
-   * If no pending item matches (e.g. the ack already won the race),
-   * `markPendingFailed` is a harmless no-op. Uncorrelated errors (unparseable
-   * frames, etc.) carry no `clientMessageId` and are logged visibly.
+   * Task 6.4 failure path, tightened by slice 5's task 6.6: a correlated
+   * error (`clientMessageId` present) flips the matching pending item to
+   * `failed` and RETAINS the error's code and reason against it — the
+   * bubble stays rendered, worded from the CODE (`rejectionWording`), never
+   * from `reason` (a server debug string), and is re-submitted only through
+   * its explicit retry control (task 6.8). If no pending item matches (e.g.
+   * the ack already won the race), `markPendingFailed` is a harmless no-op.
+   * Uncorrelated errors (unparseable frames, etc.) carry no
+   * `clientMessageId` and are logged visibly.
    */
   const handleRealtimeError = useCallback(
     (event: ErrorEvent) => {
       if (event.clientMessageId !== undefined) {
-        markPendingFailed(event.clientMessageId)
+        // Task 7.2: a correlated rejection is a ledger observation (the
+        // uncorrelated kind names no message and is not recorded).
+        observeEvent(event)
+        markPendingFailed(event.clientMessageId, { code: event.code, reason: event.reason })
+        // Task 2.7: delivery-status change, announced in words.
+        announce('Message failed to send')
         return
       }
       console.warn(`[chat] uncorrelated realtime error ${event.code}: ${event.reason}`)
     },
-    [markPendingFailed],
+    [markPendingFailed, announce, observeEvent],
   )
 
   /**
@@ -164,31 +466,68 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
    * replaces in place, so a late or duplicate NEW_MESSAGE with an id already
    * cached can never produce a second rendered bubble.
    *
-   * No conversations-rail invalidation — deliberately: the `Conversation`
-   * DTO is `{ id, participants }` only, and the rail renders nothing derived
-   * from messages (no last-message preview, no unread count). Invalidating
-   * `['conversations', user.id]` here would refetch byte-identical data and
-   * steal nothing; if the DTO ever gains message-derived fields, this is the
-   * place to add the invalidation.
+   * Rail preview (task 4.4): the same event also advances that conversation's
+   * `lastMessage` in the cached conversations array — a cache patch, never a
+   * listing refetch. For a conversation id the rail does not list, the patch
+   * is deliberately a no-op: conversations enter the rail only via the
+   * listing, `POST /api/conversations`, or CONVERSATION_CREATED (3.9); a
+   * MESSAGE event alone carries no participants, and no row is invented for an
+   * unknown id (patchConversationPreview documents the rule).
    */
   const handleNewMessage = useCallback(
     (event: NewMessageEvent) => {
+      // Task 7.2: a delivered message is a ledger observation, keyed by its
+      // server id (the sender's token ships on the message, task 7.1).
+      observeEvent(event)
       upsertAuthoritativeMessage(user.id, event.message)
+      patchConversationPreview(user.id, event.message)
+    },
+    [user.id, observeEvent],
+  )
+
+  /**
+   * Task 3.9: an incoming CONVERSATION_CREATED (someone else started a
+   * conversation with this user; the backend sends it only to the OTHER
+   * participant's connections, so a matching creation is never this window's
+   * own REST request). The rail is patched in place — the conversation is
+   * appended with an empty history exactly as the event payload represents it
+   * — with zero refetch and, deliberately, ZERO selection change: the reader
+   * stays in whatever conversation they were reading (spec: "without changing
+   * the user's active conversation").
+   *
+   * The keyed guard makes re-delivery idempotent: a duplicate event for a
+   * conversation the rail already lists is a no-op, never a second row.
+   * Preview: the `Conversation` DTO carried by the event has the same shape
+   * as the listing (slice 3) — `lastMessage` present for a non-empty history,
+   * omitted for an empty one — and the payload is stored as-is, so the row
+   * renders whatever the event actually carried.
+   */
+  const handleConversationCreated = useCallback(
+    (event: ConversationCreatedEvent) => {
+      const conversation = event.conversation
+      queryClient.setQueryData<Conversation[]>(['conversations', user.id], (existing) => {
+        if (existing === undefined) return existing
+        return existing.some((c) => c.id === conversation.id) ? existing : [...existing, conversation]
+      })
     },
     [user.id],
   )
 
-  // Realtime connection (task 6.2): the socket lifecycle is bound to this
-  // identity — created once `currentUser` is established (this shell only
-  // renders then) and terminated on user switch/unmount. `sendMessage` is
-  // consumed by the submit path below, the ack/error handlers are 6.4, the
-  // new-message handler is 6.5 (all wired here), and `connectionState` feeds
-  // the task-6.6 availability indicator and the reconnect history refresh.
-  const { sendMessage, connectionState } = useChatSocket(user.id, {
-    onMessageAck: handleMessageAck,
-    onNewMessage: handleNewMessage,
-    onRealtimeError: handleRealtimeError,
-  })
+  /**
+   * Slice 4 (task 5.4): the online-partner set, REPLACED WHOLESALE by every
+   * PRESENCE event. The backend contracts each frame as the full scoped set
+   * of online conversation partners — never a delta — so the only correct
+   * application is `new Set(event.online)`: nothing from the previous set
+   * survives an event that no longer lists it (a user who went offline is
+   * simply absent from the next snapshot, and no merge would notice).
+   * Freshness-by-ordering holds because the backend computes and enqueues
+   * every snapshot on one single-threaded executor, so the last event to
+   * arrive is the most recently computed one.
+   */
+  const [onlineUserIds, setOnlineUserIds] = useState<ReadonlySet<string>>(INITIAL_ONLINE_USER_IDS)
+  const handlePresence = useCallback((event: PresenceEvent) => {
+    setOnlineUserIds(new Set(event.online))
+  }, [])
 
   /**
    * Task 6.3 submit path. `content` arrives already boundary-trimmed and
@@ -200,14 +539,18 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
    */
   const handleSendMessage = (conversationId: string, content: string): void => {
     const clientMessageId = crypto.randomUUID()
+    const createdAt = new Date().toISOString()
     addPending({
       clientMessageId,
       conversationId,
       senderId: user.id,
       content,
-      createdAt: new Date().toISOString(),
+      createdAt,
       status: 'pending',
     })
+    // Task 7.2: the "queued" observation precedes the wire write (which the
+    // socket's onCommandSent hook may report synchronously below).
+    observeQueued({ clientMessageId, conversationId, content })
     sendMessage({ clientMessageId, conversationId, content })
   }
 
@@ -215,12 +558,223 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
     queryKey: ['conversations', user.id],
     queryFn: () => fetchConversations(user.id),
   })
+  // Task 3.5: the dialog's directory input. Same key as App's identity-gate
+  // query, so this shares that cache entry — one fetch, two consumers.
+  const directoryQuery = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(() =>
     readStoredConversationId(user.id),
   )
 
   const selectedConversation =
     conversationsQuery.data?.find((c) => c.id === selectedConversationId) ?? null
+
+  /**
+   * Task 6.6 reconnect recovery, classification refs. The window between an
+   * unexpected disconnect and the reconnect can contain messages whose
+   * NEW_MESSAGE events never reached this window ("Message recoverable after
+   * missed delivery"). Recovery: on every transition INTO `connected` AFTER
+   * this shell instance's first connection, invalidate the active
+   * conversation's history so TanStack Query refetches it from the backend.
+   *
+   * Initial-connect exclusion: `hasConnectedRef` distinguishes the two cases —
+   * the FIRST `connected` of a shell instance must NOT refetch, because the
+   * messages query already owns initial history load (mount-time fetch).
+   *
+   * StrictMode/user-switch safety: the shell mounts fresh per identity (keyed
+   * on `user.id`), so the refs reset; the StrictMode double-socket still
+   * reports exactly one connected transition (socket A is terminated before
+   * it can open), which the ref correctly classifies as the initial connect.
+   *
+   * Merge safety: the refetch commits through the task-6.7 history merge
+   * (`fetchMergedHistory` → `mergeHistoryWithCache`), which unions the
+   * response with any realtime upserts that landed while the request was in
+   * flight — a newer WebSocket message can be neither erased nor duplicated
+   * by the commit. This invalidation is the spec's recovery mechanism; the
+   * merge is what makes it safe.
+   */
+  const hasConnectedRef = useRef(false)
+  const prevConnectionStateRef = useRef<ConnectionState>('connecting')
+  /**
+   * Slice 5 (task 6.4): the transient recovery confirmation. Raised as part
+   * of the SAME classified transition into `connected` that triggers the
+   * missed-history refresh, so the thread states the recovery at the moment
+   * it happens; withdrawn on a timer (`RECOVERY_NOTICE_MS`) with no user
+   * action, and immediately if the connection drops again (the offline
+   * banner takes over — a stale "Reconnected" beside it would be a lie).
+   */
+  const [recoveryNotice, setRecoveryNotice] = useState(false)
+  const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Unmount/identity-switch (the shell is keyed on `user.id`) must not leave
+  // the withdrawal timer firing into a dead component.
+  useEffect(
+    () => () => {
+      if (recoveryTimerRef.current !== null) clearTimeout(recoveryTimerRef.current)
+    },
+    [],
+  )
+
+  /**
+   * Connection-state transition handler (a socket event, not a render
+   * effect). Classifies each transition into `connected` as initial-or-
+   * reconnect for the missed-history refresh (task 6.6) and raises (or
+   * withdraws) the transient recovery confirmation (slice 5, task 6.4).
+   * Consequences of a transition belong here, where the transition itself —
+   * previous vs next state — is observable.
+   */
+  const handleConnectionStateChange = useCallback(
+    (next: ConnectionState) => {
+      const prevState = prevConnectionStateRef.current
+      prevConnectionStateRef.current = next
+
+      if (next !== 'connected') {
+        // Not connected any more: the recovery confirmation yields to the
+        // offline banner rather than lingering beside it.
+        setRecoveryNotice(false)
+        return
+      }
+
+      const isReconnect = hasConnectedRef.current && prevState !== 'connected'
+      hasConnectedRef.current = true
+
+      if (!isReconnect) return
+
+      // The ACTIVE conversation's history is the one that must recover. The
+      // hook routes the newest handler (this callback re-arms whenever the
+      // selection changes), so this reads the current selection, never a
+      // render-frozen one.
+      if (selectedConversationId !== null) {
+        void queryClient.invalidateQueries({
+          queryKey: ['messages', user.id, selectedConversationId],
+        })
+      }
+
+      // Task 6.4: confirm the recovery in words, then withdraw it without
+      // user action after a short pause.
+      setRecoveryNotice(true)
+      if (recoveryTimerRef.current !== null) clearTimeout(recoveryTimerRef.current)
+      recoveryTimerRef.current = setTimeout(() => {
+        recoveryTimerRef.current = null
+        setRecoveryNotice(false)
+      }, RECOVERY_NOTICE_MS)
+    },
+    [user.id, selectedConversationId],
+  )
+
+  // Realtime connection (task 6.2): the socket lifecycle is bound to this
+  // identity — created once `currentUser` is established (this shell only
+  // renders then) and terminated on user switch/unmount. `sendMessage` is
+  // consumed by the submit path below, the ack/error handlers are 6.4, the
+  // new-message handler is 6.5 (all wired here), and `connectionState` feeds
+  // the task-6.6 availability indicator and the reconnect history refresh.
+  // Slice 5: `reconnectNow` backs the "Reconnect now" control (6.1) and
+  // `dropConnection` backs the DEV-only demo cut (6.5).
+  const { sendMessage, connectionState, reconnectNow, dropConnection, pendingCount } =
+    useChatSocket(user.id, {
+      onMessageAck: handleMessageAck,
+      onNewMessage: handleNewMessage,
+      onRealtimeError: handleRealtimeError,
+      onConversationCreated: handleConversationCreated,
+      onPresence: handlePresence,
+      onStateChange: handleConnectionStateChange,
+      // Task 7.2: every frame the socket actually writes becomes a ledger
+      // "sent" observation, stamped at the write by the socket itself.
+      onCommandSent: observeSent,
+    })
+
+  /**
+   * Task 6.8: the ONLY path back for a rejected message — the per-bubble
+   * control the thread pane renders. Two invariants the spec calls out:
+   *
+   * - Re-submission is under the ORIGINAL `clientMessageId`: a correlated
+   *   ERROR removed the command's queue entry inside the socket (it was a
+   *   final rejection, so `chatSocket` dropped it), which means a fresh
+   *   `sendMessage` with the same token is NOT deduped — it re-sends for
+   *   real, while still carrying the same idempotency key (a server that
+   *   persisted the first attempt despite the rejected response resolves to
+   *   the existing message; a server that didn't stores it once).
+   * - Never automatic: nothing in the app calls this without the user's
+   *   explicit activation. The socket's own queue only re-sends PENDING
+   *   (unacknowledged, un-rejected) commands, never a failed one.
+   */
+  const handleRetryMessage = useCallback(
+    (pending: PendingMessage) => {
+      markPendingRetry(pending.clientMessageId)
+      // Task 7.2: the manual retry re-queues under the ORIGINAL token — the
+      // ledger appends it to the same record rather than starting a new one.
+      observeQueued({
+        clientMessageId: pending.clientMessageId,
+        conversationId: pending.conversationId,
+        content: pending.content,
+      })
+      sendMessage({
+        clientMessageId: pending.clientMessageId,
+        conversationId: pending.conversationId,
+        content: pending.content,
+      })
+      // Task 2.7: delivery-status change, announced in words.
+      announce('Trying to send the message again')
+    },
+    [markPendingRetry, sendMessage, announce, observeQueued],
+  )
+
+  /**
+   * Task 3.5: the creation dialog's candidate list — every directory user the
+   * current user has NO conversation with, excluding themselves. The
+   * conversation listing carries full participants, so the partner set is
+   * derived locally; no extra endpoint. (The `['users']` query is deduped
+   * with App's identity-gate query — one fetch, two consumers.) `undefined`
+   * while either input is still loading; the dialog states that in words.
+   */
+  const conversationCandidates = useMemo(() => {
+    const directory = directoryQuery.data
+    const conversations = conversationsQuery.data
+    if (directory === undefined || conversations === undefined) return undefined
+    const partners = new Set(conversations.flatMap((c) => c.participants.map((p) => p.id)))
+    return directory.filter((candidate) => candidate.id !== user.id && !partners.has(candidate.id))
+  }, [directoryQuery.data, conversationsQuery.data, user.id])
+
+  /**
+   * Task 3.7: the dialog's create action. The REST call is the single
+   * authority — this handler runs ONLY its consequences, and only on a
+   * RESOLVED promise, so a rejected request (400/401/404/network, surfaced in
+   * words inside the dialog) can never mutate the rail: the failure path here
+   * is literally "nothing", which is what the spec asks for ("no conversation
+   * is added to the rail"), and the dialog stays open to retry.
+   *
+   * Success (200 create-existing or 201 create) does four things, all batched:
+   * - Patches the rail cache in place (idempotent keyed add) rather than
+   *   refetching — a 201 must appear immediately, and a 200's conversation is
+   *   usually already listed, where the patch is a verified no-op.
+   * - Selects the conversation (and persists the selection across reloads).
+   * - Closes the dialog, discarding the compact-rail re-present disposition —
+   *   the spec sends the user straight INTO the conversation, not back to the
+   *   rail — and defers focus to the composer (the effect above), which may
+   *   only be mounting with this same commit.
+   * - Announces "…opened" per the spec's assistive-technology requirement.
+   */
+  const handleCreateConversation = useCallback(
+    async (participantId: string): Promise<Conversation> => {
+      const conversation = await createConversation(user.id, participantId)
+      queryClient.setQueryData<Conversation[]>(['conversations', user.id], (existing) =>
+        existing === undefined || existing.some((c) => c.id === conversation.id)
+          ? existing
+          : [...existing, conversation],
+      )
+      storeConversationId(user.id, conversation.id)
+      setSelectedConversationId(conversation.id)
+      dialogFromCompactRailRef.current = false
+      setOpenOverlay(null)
+      pendingFocusRef.current = 'composer'
+      const other = conversation.participants.find((p) => p.id !== user.id)
+      announce(
+        `Conversation with ${
+          other?.displayName ?? conversationLabel(conversation, user.id)
+        } opened.`,
+      )
+      return conversation
+    },
+    [user.id, announce, setSelectedConversationId],
+  )
 
   // Restored-selection validation: once the conversations list arrives, a
   // stored id that no longer matches one of this user's conversations is
@@ -238,96 +792,247 @@ function SignedInShell({ user, onSwitchUser }: SignedInShellProps) {
     }
   }, [conversationsQuery.data, selectedConversationId, user.id])
 
-  /**
-   * Task 6.6 reconnect recovery. The window between an unexpected disconnect
-   * and the reconnect can contain messages whose NEW_MESSAGE events never
-   * reached this window (server-side: "Message recoverable after missed
-   * delivery"). Recovery: on every transition INTO `connected` AFTER this
-   * shell instance's first connection, invalidate the active conversation's
-   * history so TanStack Query refetches it from the backend.
-   *
-   * Initial-connect exclusion: `hasConnectedRef` distinguishes the two cases —
-   * the FIRST `connected` of a shell instance must NOT refetch, because the
-   * messages query already owns initial history load (mount-time fetch).
-   * `prevConnectionStateRef` guards the effect's dependencies: re-running the
-   * effect for a conversation switch while already `connected` is not a
-   * reconnect and must not refetch either.
-   *
-   * StrictMode/user-switch safety: the shell mounts fresh per identity (keyed
-   * on `user.id`), so both refs reset; the StrictMode double-socket still
-   * reports exactly one connected transition (socket A is terminated before
-   * it can open), which the ref correctly classifies as the initial connect.
-   *
-   * Merge safety: this refetch commits through the task-6.7 history merge
-   * (`fetchMergedHistory` → `mergeHistoryWithCache`), which unions the
-   * response with any realtime upserts that landed while the request was in
-   * flight — a newer WebSocket message can be neither erased nor duplicated
-   * by the commit. This invalidation is the spec's recovery mechanism; the
-   * merge is what makes it safe.
-   */
-  const hasConnectedRef = useRef(false)
-  const prevConnectionStateRef = useRef<ConnectionState>(connectionState)
+  // Task 7.9: selecting a DIFFERENT conversation clears the inspected message
+  // selection (the record belongs to the old thread). The drawer itself stays
+  // open in its no-selection view — connection and protocol facts are scoped
+  // to the session, not to the conversation. Identity changes remount the
+  // whole shell (keyed on user.id), which resets this state wholesale.
+  const prevSelectedConversationRef = useRef<string | null>(selectedConversationId)
   useEffect(() => {
-    const prevState = prevConnectionStateRef.current
-    prevConnectionStateRef.current = connectionState
-
-    if (connectionState !== 'connected') return
-    const isReconnect = hasConnectedRef.current && prevState !== 'connected'
-    hasConnectedRef.current = true
-
-    if (isReconnect && selectedConversationId !== null) {
-      void queryClient.invalidateQueries({
-        queryKey: ['messages', user.id, selectedConversationId],
-      })
-    }
-  }, [connectionState, user.id, selectedConversationId])
+    if (prevSelectedConversationRef.current === selectedConversationId) return
+    prevSelectedConversationRef.current = selectedConversationId
+    setInspection((prev) =>
+      prev !== null && prev.target.kind === 'message' ? { target: { kind: 'connection' } } : prev,
+    )
+  }, [selectedConversationId])
 
   const handleSelectConversation = (conversationId: string) => {
     storeConversationId(user.id, conversationId)
     setSelectedConversationId(conversationId)
+    // Task 2.6: selecting a conversation is one of the overlay's dismissal
+    // mechanisms, and it must go through the same focus-returning close as
+    // Escape and the scrim — the compact rail leaves the DOM inert as it
+    // closes, so dismissing via selection has to put focus back on a live
+    // control (the toggle) instead of dropping it onto <body>.
+    closeOverlay()
+    // Task 2.7: conversation-selection change, announced in words.
+    const conversation = conversationsQuery.data?.find((c) => c.id === conversationId)
+    if (conversation !== undefined) {
+      announce(`Conversation with ${conversationLabel(conversation, user.id)} selected`)
+    }
   }
+
+  const isRailOpen = openOverlay === 'rail'
 
   return (
     <div className="shell">
-      <header className="app-header">
+      {/* Task 2.7: first focusable element on the signed-in shell. */}
+      <a href="#main-content" className="skip-link">
+        Skip to conversation
+      </a>
+      <header className="app-header" aria-label="Chat">
         <div className="app-header-brand">
-          <span className="brand-mark brand-mark--sm" aria-hidden="true" />
+          {isCompact && (
+            <button
+              ref={railToggleRef}
+              type="button"
+              className="icon-button mobile-rail-toggle"
+              aria-label={isRailOpen ? 'Close conversations' : 'Open conversations'}
+              aria-expanded={isRailOpen}
+              aria-controls="conversation-rail"
+              onClick={() => (isRailOpen ? closeOverlay() : openRailOverlay())}
+            >
+              <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M4 7h16M4 12h16M4 17h16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          )}
+          <span className="brand-mark brand-mark--sm" aria-hidden="true">
+            <svg className="brand-mark-icon" viewBox="0 0 24 24">
+              <path d="M12 3.2c-5.1 0-9.2 3.2-9.2 7.2 0 2.2 1.3 4.2 3.3 5.6-.2 1.2-.9 2.5-2 3.7 2-.3 3.8-1.1 5.2-2.2.9.2 1.8.3 2.7.3 5.1 0 9.2-3.2 9.2-7.4S17.1 3.2 12 3.2Z" />
+            </svg>
+          </span>
           <span className="title">Chat</span>
         </div>
         <div className="app-header-user">
+          {/* Slice 5 (task 6.5): the ONLY connection-severing control in the
+              app, gated on `import.meta.env.DEV` so the control's string and
+              click handler are stripped from production bundles (the spec:
+              a production build contains no intentional-severing control).
+              The gate deliberately wraps the CONTROL only — `dropConnection`
+              itself stays public on the socket and is exercised by tests.
+              It sits LEFT of the connection indicator and hides itself while a
+              reconnect is in flight, so a single press reads as a self-resetting
+              "Test reconnect": drop → ~1s offline → reconnect → control returns. */}
+          {import.meta.env.DEV && connectionState === 'connected' && (
+            <button
+              type="button"
+              className="btn btn-ghost dev-test-reconnect"
+              onClick={dropConnection}
+              title="Test reconnect (demo)"
+            >
+              Test reconnect
+            </button>
+          )}
           <ConnectionStatus state={connectionState} />
-          <span className="chip">
+          <button
+            type="button"
+            className="icon-button theme-toggle"
+            onClick={toggleTheme}
+            aria-pressed={theme === 'dark'}
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          >
+            {theme === 'dark' ? (
+              <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                <path
+                  d="M12 2v2.5M12 19.5V22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M2 12h2.5M19.5 12H22M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+            ) : (
+              <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+          </button>
+          <button
+            type="button"
+            className="user-chip"
+            onClick={onSwitchUser}
+            aria-haspopup="dialog"
+            aria-label={`Signed in as ${user.displayName}. Switch user`}
+            title="Switch user"
+          >
             <span className="avatar avatar--sm" aria-hidden="true">
               {initials(user.displayName)}
             </span>
-            {user.displayName}
-          </span>
-          <button type="button" className="btn btn-ghost" onClick={onSwitchUser}>
-            Switch user
+            <span className="user-chip-name">{user.displayName}</span>
+            <svg className="icon user-chip-caret" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="m7 10 5 5 5-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
         </div>
       </header>
-      <main className="shell-body">
+      {/* Task 7.5: docking adds the third grid column (the drawer). Overlay
+          mode never does — the panel is fixed-positioned and out of flow. */}
+      <main
+        id="main-content"
+        className={
+          inspection !== null && selectedConversation !== null && !isInspectorOverlay
+            ? 'shell-body shell-body--inspector-open'
+            : 'shell-body'
+        }
+        tabIndex={-1}
+      >
         <ConversationList
           currentUserId={user.id}
           conversations={conversationsQuery.data}
           isPending={conversationsQuery.isPending}
           error={conversationsQuery.error}
           onRetry={() => void conversationsQuery.refetch()}
+          pendingMessages={pendingMessages}
+          onlineUserIds={onlineUserIds}
+          waitingForConnection={connectionState !== 'connected'}
           selectedId={selectedConversationId}
           onSelect={handleSelectConversation}
+          isCompact={isCompact}
+          isOverlayOpen={isRailOpen}
+          onNewConversation={openNewConversation}
+          newConversationButtonRef={newConversationRef}
+          isNewConversationOpen={openOverlay === 'new-conversation'}
         />
         <ThreadPane
           currentUser={user}
           conversation={selectedConversation}
           pendingMessages={pendingMessages}
+          connectionState={connectionState}
+          recoveryNotice={recoveryNotice}
+          onReconnectNow={reconnectNow}
+          onRetryMessage={handleRetryMessage}
+          composerFocusRef={composerRef}
           onSendMessage={(content) => {
             if (selectedConversation !== null) {
               handleSendMessage(selectedConversation.id, content)
             }
           }}
+          inspectorOpen={inspection !== null}
+          inspectedKey={
+            inspection?.target.kind === 'message' ? inspection.target.key : null
+          }
+          onInspectMessage={handleInspectMessage}
+          onToggleInspector={handleToggleInspector}
+          inspectorControlRef={inspectorControlRef}
         />
+        {/* Slice 6 (tasks 7.5–7.9): the info drawer. It renders only while a
+            conversation is selected (every entry point requires one) and only
+            while open — the threshold decides presentation, never existence,
+            so crossing it keeps the inspected message (no unmount of state). */}
+        {inspection !== null && selectedConversation !== null && (
+          <InspectorDrawer
+            target={inspection.target}
+            overlay={isInspectorOverlay}
+            currentUser={user}
+            conversation={selectedConversation}
+            pendingMessages={pendingMessages}
+            ledger={ledger}
+            connectionState={connectionState}
+            getPendingCommandCount={pendingCount}
+            onClose={() => closeInspector(true)}
+          />
+        )}
       </main>
+      {/* Task 3.5: the creation dialog is the overlay state machine's second
+          modal. It renders only while it IS the open overlay (single-overlay
+          exclusivity); Escape, its own scrim, and Cancel all route through the
+          same focus-returning closeOverlay as the rail's dismissal paths. */}
+      {openOverlay === 'new-conversation' && (
+        <CreateConversationDialog
+          candidates={conversationCandidates}
+          onCreate={(participantId) => handleCreateConversation(participantId)}
+          onDismiss={closeOverlay}
+        />
+      )}
+      {/* Task 2.6: the scrim is one of the overlay's dismissal mechanisms and
+          doubles as the visual cue that the rail is modal while open. */}
+      {isRailOpen && (
+        <button type="button" className="scrim" aria-label="Close conversations" onClick={closeOverlay} />
+      )}
+      {/* Task 7.5: below the 980px threshold the open inspector overlays the
+          thread with a scrim — the same dismissal-and-cue surface as the
+          rail's, routing through the same focus-returning close. */}
+      {inspection !== null && selectedConversation !== null && isInspectorOverlay && (
+        <button
+          type="button"
+          className="scrim"
+          aria-label="Close info"
+          onClick={() => closeInspector(true)}
+        />
+      )}
     </div>
   )
 }

@@ -90,14 +90,38 @@ class CommitBeforeAckWebSocketIntegrationTest {
     private fun poll(queue: LinkedBlockingQueue<String>) =
         queue.poll(5, TimeUnit.SECONDS) ?: fail<String>("no frame received within timeout")
 
+    /**
+     * Presence (add-conversation-creation-presence-inspector task 5.3) makes a
+     * `PRESENCE` snapshot every connection's first event, and a transition
+     * broadcast follows each peer's connect. These tests are about the message
+     * path, so they (a) block until the snapshot has actually arrived --
+     * presence is delivered asynchronously on its own executor, so it can
+     * race any frame the test sends -- and (b) skip presence frames whenever
+     * one shows up before the frame these tests assert on.
+     */
+    private fun awaitInitialPresence(queue: LinkedBlockingQueue<String>) {
+        val first = objectMapper.readTree(poll(queue))
+        assertThat(first.get("type").asText())
+            .describedAs("a connection's first event is its presence snapshot")
+            .isEqualTo("PRESENCE")
+    }
+
+    private fun pollSkippingPresence(queue: LinkedBlockingQueue<String>): String {
+        while (true) {
+            val frame = poll(queue)
+            if (objectMapper.readTree(frame).get("type").asText() != "PRESENCE") return frame
+        }
+    }
+
     @Test
     fun `MESSAGE_ACK arrives only after the row is visible to an independent database connection`() {
         val (session, queue) = connect(SeedData.ALICE_ID)
         try {
+            awaitInitialPresence(queue)
             val clientMessageId = UUID.randomUUID()
             sendMessageFrame(session, clientMessageId, SeedData.CONVERSATION_ID, "commit before ack ${UUID.randomUUID()}")
 
-            val ackJson = poll(queue)
+            val ackJson = pollSkippingPresence(queue)
             val ackNode = objectMapper.readTree(ackJson)
             assertThat(ackNode.get("type").asText()).isEqualTo("MESSAGE_ACK")
             val messageId = UUID.fromString(ackNode.get("message").get("id").asText())
@@ -133,14 +157,17 @@ class CommitBeforeAckWebSocketIntegrationTest {
         val (aliceSession, aliceQueue) = connect(SeedData.ALICE_ID)
         val (bobSession, bobQueue) = connect(SeedData.BOB_ID)
         try {
+            awaitInitialPresence(aliceQueue)
+            awaitInitialPresence(bobQueue)
             val clientMessageId = UUID.randomUUID()
             sendMessageFrame(aliceSession, clientMessageId, SeedData.CONVERSATION_ID, "fan-out check ${UUID.randomUUID()}")
 
-            val aliceFrame = objectMapper.readTree(poll(aliceQueue))
+            val aliceFrame = objectMapper.readTree(pollSkippingPresence(aliceQueue))
             assertThat(aliceFrame.get("type").asText()).isEqualTo("MESSAGE_ACK")
-            assertThat(aliceQueue.poll(500, TimeUnit.MILLISECONDS)).isNull() // origin gets ack only, nothing else
+            // The origin gets its ack and nothing but (late) presence frames.
+            assertThatNoMessageEventArrives(aliceQueue)
 
-            val bobFrame = objectMapper.readTree(poll(bobQueue))
+            val bobFrame = objectMapper.readTree(pollSkippingPresence(bobQueue))
             assertThat(bobFrame.get("type").asText()).isEqualTo("NEW_MESSAGE")
             assertThat(bobFrame.get("message").get("id").asText())
                 .isEqualTo(aliceFrame.get("message").get("id").asText())
@@ -154,9 +181,10 @@ class CommitBeforeAckWebSocketIntegrationTest {
     fun `an invalid command frame gets INVALID_COMMAND and the connection keeps working afterwards`() {
         val (session, queue) = connect(SeedData.ALICE_ID)
         try {
+            awaitInitialPresence(queue)
             session.sendMessage(TextMessage("{not valid json"))
 
-            val errorFrame = objectMapper.readTree(poll(queue))
+            val errorFrame = objectMapper.readTree(pollSkippingPresence(queue))
             assertThat(errorFrame.get("type").asText()).isEqualTo("ERROR")
             assertThat(errorFrame.get("code").asText()).isEqualTo(com.example.chat.ws.protocol.ErrorCodes.INVALID_COMMAND)
 
@@ -164,10 +192,26 @@ class CommitBeforeAckWebSocketIntegrationTest {
             // still works -- the bad frame did not terminate anything.
             val clientMessageId = UUID.randomUUID()
             sendMessageFrame(session, clientMessageId, SeedData.CONVERSATION_ID, "still alive ${UUID.randomUUID()}")
-            val ackFrame = objectMapper.readTree(poll(queue))
+            val ackFrame = objectMapper.readTree(pollSkippingPresence(queue))
             assertThat(ackFrame.get("type").asText()).isEqualTo("MESSAGE_ACK")
         } finally {
             session.close()
+        }
+    }
+
+    /**
+     * Presence frames may still be trickling in from the (already-finished)
+     * connection setup; nothing but presence may arrive: no `NEW_MESSAGE` for
+     * the origin's own command, no `ERROR`.
+     */
+    private fun assertThatNoMessageEventArrives(queue: LinkedBlockingQueue<String>) {
+        val deadline = System.currentTimeMillis() + 500
+        while (true) {
+            val frame = queue.poll((deadline - System.currentTimeMillis()).coerceAtLeast(1), TimeUnit.MILLISECONDS)
+                ?: return
+            assertThat(objectMapper.readTree(frame).get("type").asText())
+                .describedAs("the origin's own command must not fan out back to it")
+                .isEqualTo("PRESENCE")
         }
     }
 

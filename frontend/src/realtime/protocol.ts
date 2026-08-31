@@ -9,18 +9,21 @@
  *   server -> client: MESSAGE_ACK { clientMessageId, message }
  *                     NEW_MESSAGE { message }
  *                     ERROR { clientMessageId?, code, reason }
+ *                     PRESENCE { online: uuid[] }
  *
- * Server-authoritative messages (design.md): `clientMessageId` is only a
- * correlation/idempotency token; the `message` payload carried by MESSAGE_ACK
- * and NEW_MESSAGE is the authoritative shape `{ id, conversationId, senderId,
- * content, createdAt }` — identical to the REST DTO defined in `../api.ts`.
+ * Server-authoritative messages (design.md): `clientMessageId` is a
+ * correlation/idempotency token, never an identifier. Slice 6 (task 7.1)
+ * reversed the token's original non-exposure: the `message` payload carried by
+ * MESSAGE_ACK and NEW_MESSAGE is the authoritative shape `{ id,
+ * conversationId, senderId, clientMessageId, content, createdAt }` — identical
+ * to the REST DTO defined in `../api.ts`.
  *
  * There is deliberately no `senderId` field on the outbound command: the
  * backend derives the sender from the validated connection identity bound at
  * the `?userId=` handshake and ignores any client-supplied sender field.
  */
 
-import type { Message } from '../api'
+import type { Conversation, Message } from '../api'
 
 /** Client -> server command to create a message. */
 export interface SendMessageCommand {
@@ -59,8 +62,39 @@ export interface ErrorEvent {
   reason: string
 }
 
+/**
+ * Sent to every active connection of the OTHER participant after
+ * `POST /api/conversations` commits a new conversation — never to the creator,
+ * who already holds the REST response, and never for the 200 (already-existed)
+ * case. The embedded conversation reuses the REST `Conversation` shape and has
+ * an empty history (task 3.9 renders it with an empty rail preview).
+ */
+export interface ConversationCreatedEvent {
+  type: 'CONVERSATION_CREATED'
+  conversation: Conversation
+}
+
+/**
+ * Sent as a socket's FIRST event after the handshake (its current snapshot),
+ * and again on every online/offline transition of one of the recipient's
+ * conversation partners. `online` is the WHOLESALE, full scoped set of online
+ * user ids — a complete replacement of whatever the client held before, never
+ * a delta and never merged, and never containing the recipient themself. The
+ * empty array is meaningful and always serialised: none of the recipient's
+ * conversation partners is online.
+ */
+export interface PresenceEvent {
+  type: 'PRESENCE'
+  online: string[]
+}
+
 /** Union of every event the server can send. */
-export type InboundEvent = MessageAckEvent | NewMessageEvent | ErrorEvent
+export type InboundEvent =
+  | MessageAckEvent
+  | NewMessageEvent
+  | ErrorEvent
+  | ConversationCreatedEvent
+  | PresenceEvent
 
 /**
  * Stable, machine-readable ERROR codes (mirror of the backend `ErrorCodes`
@@ -101,8 +135,35 @@ function isMessage(value: unknown): value is Message {
     typeof value.id === 'string' &&
     typeof value.conversationId === 'string' &&
     typeof value.senderId === 'string' &&
+    // Slice 6 (task 7.1): the correlation token ships ON the message, so a
+    // payload without it fails validation — never fabricate one downstream.
+    typeof value.clientMessageId === 'string' &&
     typeof value.content === 'string' &&
     typeof value.createdAt === 'string'
+  )
+}
+
+/** Mirrors the REST `User`/`Conversation` DTOs shared with `../api.ts`. */
+function isUser(value: unknown): value is Conversation['participants'][number] {
+  return isRecord(value) && typeof value.id === 'string' && typeof value.displayName === 'string'
+}
+
+/**
+ * Mirrors the REST `User`/`Conversation` DTOs shared with `../api.ts`.
+ * Slice 3 (task 4.0): `lastMessage` is optional and — per the backend's global
+ * `non_null` Jackson inclusion — is OMITTED for an empty history, never
+ * serialised as a literal `null`. A defensive `null` is still accepted here
+ * (absent === null) and normalised to absent by the CONVERSATION_CREATED arms
+ * below, so the parsed event matches the frontend's `lastMessage?: Message`
+ * contract exactly.
+ */
+function isConversation(value: unknown): value is Conversation {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    Array.isArray(value.participants) &&
+    value.participants.every(isUser) &&
+    (value.lastMessage === undefined || value.lastMessage === null || isMessage(value.lastMessage))
   )
 }
 
@@ -127,7 +188,11 @@ export function parseInboundEvent(raw: string): InboundEvent | null {
 
   switch (json.type) {
     case 'MESSAGE_ACK': {
-      if (typeof json.clientMessageId !== 'string' || !isMessage(json.message)) {
+      if (
+        typeof json.clientMessageId !== 'string' ||
+        !isMessage(json.message) ||
+        json.clientMessageId !== json.message.clientMessageId
+      ) {
         return null
       }
       const event: MessageAckEvent = {
@@ -161,6 +226,32 @@ export function parseInboundEvent(raw: string): InboundEvent | null {
           ? { clientMessageId: json.clientMessageId }
           : {}),
       }
+      return event
+    }
+    case 'CONVERSATION_CREATED': {
+      if (!isConversation(json.conversation)) {
+        return null
+      }
+      // Normalise (see isConversation): an empty history is an ABSENT
+      // `lastMessage` — a defensive literal null is coerced to absence so
+      // consumers only ever see `lastMessage?: Message`.
+      const { lastMessage, ...conversation } = json.conversation
+      const event: ConversationCreatedEvent = {
+        type: 'CONVERSATION_CREATED',
+        conversation:
+          lastMessage === undefined || lastMessage === null
+            ? conversation
+            : { ...conversation, lastMessage },
+      }
+      return event
+    }
+    case 'PRESENCE': {
+      // The empty array IS valid (a fully offline partner set) and required —
+      // the backend always serialises it, so a missing `online` is malformed.
+      if (!Array.isArray(json.online) || !json.online.every((id) => typeof id === 'string')) {
+        return null
+      }
+      const event: PresenceEvent = { type: 'PRESENCE', online: json.online }
       return event
     }
     default:
