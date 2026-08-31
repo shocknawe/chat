@@ -62,6 +62,14 @@ export interface RealtimeEventHandlers {
    * and the recovery confirmation in `App.tsx`.
    */
   onStateChange?: (state: ConnectionState) => void
+  /**
+   * Slice 6 (task 7.2): passthrough for the socket's `onCommandSent`
+   * instrumentation — fired for every SEND_MESSAGE frame actually written to
+   * an open socket (immediate send and reconnect-queue flush alike). The
+   * transport ledger consumes this; it is not an inbound event and so lives
+   * beside, not inside, the dispatch switch.
+   */
+  onCommandSent?: (command: Omit<SendMessageCommand, 'type'>, sentAt: string) => void
 }
 
 export interface UseChatSocketResult {
@@ -147,6 +155,10 @@ export function useChatSocket(
         setConnectionState(state)
         handlersRef.current.onStateChange?.(state)
       },
+      // Task 7.2: the wire-write instrumentation hook, routed like any other
+      // callback through the ref so the connection is never torn down for a
+      // handler change.
+      onCommandSent: (command, sentAt) => handlersRef.current.onCommandSent?.(command, sentAt),
       // Parse/transport errors are non-fatal (the socket reconnects on its
       // own); log for now, richer surfacing can land with 6.4–6.6.
       onError: (error) => {

@@ -20,6 +20,7 @@
  */
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -33,7 +34,7 @@ import App from "./App";
 import * as api from "./api";
 import type { Conversation, Message, User } from "./api";
 import { EMPTY_PREVIEW } from "./conversationPreview";
-import { COMPACT_QUERY } from "./hooks/useMediaQuery";
+import { COMPACT_QUERY, INSPECTOR_OVERLAY_QUERY } from "./hooks/useMediaQuery";
 import { queryClient } from "./queryClient";
 import * as realtime from "./realtime";
 import type { ChatSocket, ChatSocketOptions } from "./realtime";
@@ -54,6 +55,8 @@ function msg(
     id,
     conversationId: CONVERSATION.id,
     senderId: USER_B.id,
+    // Slice 6 (task 7.1): the correlation token ships on every message.
+    clientMessageId: `client-${id}`,
     content: `content-${id}`,
     createdAt,
     ...overrides,
@@ -1215,5 +1218,518 @@ describe("presence (tasks 5.4–5.5, 5.9)", () => {
     expect(
       await within(rail()).findByRole("button", { name: "Carol Offline" }),
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * Slice 6 — the info drawer (OpenSpec tasks 7.4–7.10, spec
+ * `message-inspector`). Same seam as every suite above: the real
+ * `SignedInShell`, faked REST (`./api`) and transport (`createChatSocket`).
+ * The default jsdom matchMedia polyfill reports NO query as matching, so the
+ * drawer is DOCKED in these suites unless one installs its own matchMedia
+ * (the overlay suites do).
+ */
+describe("info drawer (slice 6)", () => {
+  /** The open inspector panel (docked or overlaid), or null. */
+  function inspectorPanel(): HTMLElement | null {
+    return document.querySelector<HTMLElement>("#inspector-panel");
+  }
+
+  function infoButtonFor(content: string): HTMLButtonElement {
+    return within(threadPane()).getByRole("button", {
+      name: `Message info: ${content}`,
+    });
+  }
+
+  beforeEach(() => {
+    vi.spyOn(api, "fetchMessages").mockResolvedValue([
+      msg("m1", "2026-08-30T11:58:00.000Z", { content: "first from bob" }),
+      msg("m2", "2026-08-30T11:59:00.000Z", { content: "second from bob" }),
+    ]);
+  });
+
+  it("carries an accessibly named info affordance on EVERY message, including own pending ones (task 7.4)", async () => {
+    const user = await renderSignedInOnConversation();
+    connectSocket();
+
+    expect(infoButtonFor("first from bob")).toBeInTheDocument();
+    expect(infoButtonFor("second from bob")).toBeInTheDocument();
+
+    // An own PENDING message carries the affordance too.
+    const textbox = await screen.findByRole("textbox", { name: /message to bob/i });
+    await user.type(textbox, "my pending draft");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(
+      await within(threadPane()).findByRole("button", {
+        name: "Message info: my pending draft",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("inspecting a message opens the drawer on its record, distinguishes it, and exposes the affordance as expanded (tasks 7.4/7.7)", async () => {
+    const user = await renderSignedInOnConversation();
+
+    const affordance = infoButtonFor("first from bob");
+    expect(affordance).toHaveAttribute("aria-expanded", "false");
+    await user.click(affordance);
+
+    // The affordance is expanded, the bubble is visually distinguished, and
+    // the drawer renders the message's record — its ids, correlation token
+    // (from the message itself, task 7.1), timestamps, ordering key, and
+    // content length against the documented maximum.
+    expect(affordance).toHaveAttribute("aria-expanded", "true");
+    const panel = inspectorPanel();
+    expect(panel).not.toBeNull();
+    expect(within(panel as HTMLElement).getByText("first from bob")).toBeInTheDocument();
+    expect(within(panel as HTMLElement).getByText("client-m1")).toBeInTheDocument(); // correlation token
+    expect(within(panel as HTMLElement).getByText("m1")).toBeInTheDocument(); // message id
+    expect(within(panel as HTMLElement).getByText("(createdAt ASC, id ASC)")).toBeInTheDocument();
+    expect(within(panel as HTMLElement).getByText("14 / 4000 code points")).toBeInTheDocument();
+    expect(
+      threadPane().querySelector(".message-item--inspected"),
+    ).not.toBeNull();
+  });
+
+  it("the thread-header control opens the drawer with NO message selected, on connection and protocol facts (task 7.4)", async () => {
+    const user = await renderSignedInOnConversation();
+
+    await user.click(
+      screen.getByRole("button", { name: "Conversation info" }),
+    );
+
+    const panel = inspectorPanel();
+    expect(panel).not.toBeNull();
+    expect(within(panel as HTMLElement).getByText("Connection")).toBeInTheDocument();
+    expect(within(panel as HTMLElement).getByText("Protocol")).toBeInTheDocument();
+    expect(
+      within(panel as HTMLElement).getByText(/Awaiting acknowledgement/),
+    ).toBeInTheDocument();
+    // No message subject, and no per-message affordance is expanded.
+    expect(
+      threadPane().querySelector(".message-item--inspected"),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Conversation info" }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("closing returns focus to the ⓘ control that opened it (tasks 7.6/7.11)", async () => {
+    const user = await renderSignedInOnConversation();
+
+    const affordance = infoButtonFor("second from bob");
+    await user.click(affordance);
+    expect(inspectorPanel()).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Close info" }));
+    expect(inspectorPanel()).toBeNull();
+    expect(document.activeElement).toBe(
+      infoButtonFor("second from bob"),
+    );
+  });
+
+  it("inspect a pending message, then its ack: the drawer STAYS OPEN against the server identity, and close falls back to the header control once the originator is gone (tasks 7.6/7.9)", async () => {
+    const user = await renderSignedInOnConversation();
+    connectSocket();
+    const socket = captured[0]!;
+
+    const textbox = await screen.findByRole("textbox", { name: /message to bob/i });
+    await user.type(textbox, "inspect me while pending");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const sent = socket.sendMessage.mock.calls[0]?.[0] as { clientMessageId: string };
+
+    // Inspect the PENDING bubble. The record honestly lacks a server id.
+    await user.click(
+      await within(threadPane()).findByRole("button", {
+        name: "Message info: inspect me while pending",
+      }),
+    );
+    let panel = inspectorPanel();
+    expect(panel).not.toBeNull();
+    expect(within(panel as HTMLElement).getByText(sent.clientMessageId)).toBeInTheDocument();
+    expect(within(panel as HTMLElement).getByText(/does not exist yet/)).toBeInTheDocument();
+
+    // The ack arrives WHILE the drawer is open: it must not close, and it
+    // re-scopes the record to the server identity.
+    act(() => {
+      socket.options.onEvent?.({
+        type: "MESSAGE_ACK",
+        clientMessageId: sent.clientMessageId,
+        message: msg("m-acked", "2026-08-30T12:00:00.000Z", {
+          senderId: USER_A.id,
+          clientMessageId: sent.clientMessageId,
+          content: "inspect me while pending",
+        }),
+      });
+    });
+
+    panel = inspectorPanel();
+    expect(panel).not.toBeNull();
+    expect(within(panel as HTMLElement).getByText("m-acked")).toBeInTheDocument();
+    // The ack-semantics caveat is stated (task 7.8).
+    expect(
+      within(panel as HTMLElement).getByText(/Acknowledged means persisted by the server/),
+    ).toBeInTheDocument();
+    // Fan-out is presented as unverified.
+    expect(
+      within(panel as HTMLElement).getByText(/Fan-out is unverified/),
+    ).toBeInTheDocument();
+    // The pending bubble's own ⓘ control — the drawer's originator — is gone
+    // with the pending slice (the acked history bubble carries an affordance
+    // of the same NAME, but it is a different element).
+    expect(document.querySelector(".message-bubble--pending")).toBeNull();
+
+    // Closing now cannot return focus to the original (pending) ⓘ — its DOM
+    // is gone — so focus lands on the thread-header inspector control.
+    await user.click(screen.getByRole("button", { name: "Close info" }));
+    expect(inspectorPanel()).toBeNull();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Conversation info" }),
+    );
+  });
+
+  it("states 'transport not observed in this session' for a historical message, while its persistent fields still render (task 7.8)", async () => {
+    const user = await renderSignedInOnConversation();
+
+    await user.click(infoButtonFor("first from bob"));
+
+    const panel = inspectorPanel() as HTMLElement;
+    expect(
+      within(panel).getByText(/Transport not observed in this session/),
+    ).toBeInTheDocument();
+    // Persistent fields come from the message itself and render regardless.
+    expect(within(panel).getByText("client-m1")).toBeInTheDocument();
+    expect(within(panel).getByText("2026-08-30T11:58:00.000Z")).toBeInTheDocument();
+    // And no step timeline is faked up with em-dashes.
+    expect(panel.querySelector(".inspector-step-list")).toBeNull();
+  });
+
+  it("records observed transport steps and protocol frames for a message sent this session (tasks 7.2/7.7)", async () => {
+    const user = await renderSignedInOnConversation();
+    connectSocket();
+    const socket = captured[0]!;
+
+    const textbox = await screen.findByRole("textbox", { name: /message to bob/i });
+    await user.type(textbox, "wired all the way");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const sent = socket.sendMessage.mock.calls[0]?.[0] as { clientMessageId: string };
+    act(() => {
+      // The fake socket does not write anything itself. Explicitly report the
+      // successful write through the real instrumentation seam so the ledger
+      // cannot pass this test with a fabricated queue-time frame.
+      socket.options.onCommandSent?.(
+        {
+          clientMessageId: sent.clientMessageId,
+          conversationId: CONVERSATION.id,
+          content: "wired all the way",
+        },
+        "2026-08-30T11:59:59.750Z",
+      );
+      socket.options.onEvent?.({
+        type: "MESSAGE_ACK",
+        clientMessageId: sent.clientMessageId,
+        message: msg("m-wired", "2026-08-30T12:00:00.000Z", {
+          senderId: USER_A.id,
+          clientMessageId: sent.clientMessageId,
+          content: "wired all the way",
+        }),
+      });
+    });
+
+    await user.click(
+      await within(threadPane()).findByRole("button", {
+        name: "Message info: wired all the way",
+      }),
+    );
+
+    const panel = inspectorPanel() as HTMLElement;
+    // The ordered observed steps each carry a timestamp (clock stamp form).
+    for (const label of [
+      "Queued in this window",
+      "Written to the socket",
+      "Persisted and acknowledged",
+    ]) {
+      expect(within(panel).getByText(label)).toBeInTheDocument();
+    }
+    // The recorded wire frames render per the API spec's shapes.
+    expect(within(panel).getByText("SEND_MESSAGE")).toBeInTheDocument();
+    expect(within(panel).getByText("MESSAGE_ACK")).toBeInTheDocument();
+    expect(within(panel).getByText(/"type": "SEND_MESSAGE"/)).toBeInTheDocument();
+  });
+
+  it("clears the inspected selection when a different conversation is selected, keeping the drawer open on the connection view (task 7.9)", async () => {
+    vi.spyOn(api, "fetchConversations").mockResolvedValue([
+      CONVERSATION,
+      CONVERSATION_WITH_C,
+    ]);
+    vi.spyOn(api, "fetchUsers").mockResolvedValue(DIRECTORY);
+    const user = await renderSignedInOnConversation();
+
+    await user.click(infoButtonFor("first from bob"));
+    expect(
+      threadPane().querySelector(".message-item--inspected"),
+    ).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Carol Offline" }));
+
+    // The drawer stays open but the message selection is gone — connection
+    // and protocol facts replace the record.
+    const panel = inspectorPanel();
+    expect(panel).not.toBeNull();
+    expect(within(panel as HTMLElement).getByText("Connection")).toBeInTheDocument();
+    expect(within(panel as HTMLElement).queryByText("client-m1")).toBeNull();
+  });
+});
+
+/**
+ * Task 7.10: the correlation token survives a reload — for a SENT message
+ * and for a RECEIVED one. The reload is simulated honestly at the React
+ * layer: unmount, clear the query cache, remount. sessionStorage (identity
+ * and selection restore) is retained, exactly like a browser reload; the
+ * session-scoped transport ledger is correctly gone afterwards.
+ */
+describe("correlation token across a reload (task 7.10)", () => {
+  async function reloadIntoConversation(
+    historyOfConv1: Message[],
+  ): Promise<void> {
+    // Simulate the reload: unmount EVERYTHING, drop the query cache, keep
+    // sessionStorage (identity + selected conversation restore from it).
+    cleanup();
+    queryClient.clear();
+    vi.spyOn(api, "fetchMessages").mockResolvedValue(historyOfConv1);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>,
+    );
+    // Identity restores from sessionStorage — the sign-in screen is skipped
+    // and the Bob conversation is selected from the stored id.
+    await screen.findByRole("button", { name: "Conversation info" });
+  }
+
+  function inspectorPanel(): HTMLElement {
+    const panel = document.querySelector<HTMLElement>("#inspector-panel");
+    expect(panel).not.toBeNull();
+    return panel as HTMLElement;
+  }
+
+  it("for a message SENT before the reload", async () => {
+    vi.spyOn(api, "fetchMessages").mockResolvedValue([]);
+    const user = await renderSignedInOnConversation();
+    connectSocket();
+    const socket = captured[0]!;
+
+    const textbox = await screen.findByRole("textbox", { name: /message to bob/i });
+    await user.type(textbox, "sent before reload");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const sent = socket.sendMessage.mock.calls[0]?.[0] as { clientMessageId: string };
+    act(() => {
+      socket.options.onEvent?.({
+        type: "MESSAGE_ACK",
+        clientMessageId: sent.clientMessageId,
+        message: msg("m-sent", "2026-08-30T12:00:00.000Z", {
+          senderId: USER_A.id,
+          clientMessageId: sent.clientMessageId,
+          content: "sent before reload",
+        }),
+      });
+    });
+    await within(threadPane()).findByRole("button", {
+      name: "Message info: sent before reload",
+    });
+
+    // RELOAD: history now serves the message with its token ON it (7.1).
+    await reloadIntoConversation([
+      msg("m-sent", "2026-08-30T12:00:00.000Z", {
+        senderId: USER_A.id,
+        clientMessageId: sent.clientMessageId,
+        content: "sent before reload",
+      }),
+    ]);
+
+    const user2 = userEvent.setup();
+    await user2.click(
+      await within(threadPane()).findByRole("button", {
+        name: "Message info: sent before reload",
+      }),
+    );
+    const panel = inspectorPanel();
+    // The token survived on the message itself — rendered after the reload…
+    expect(within(panel).getByText(sent.clientMessageId)).toBeInTheDocument();
+    expect(
+      within(panel).getByText(/token persisted on the message/i),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByText(/window that minted it was not observed in this session/i),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).queryByText(/token minted in this window/i),
+    ).not.toBeInTheDocument();
+    expect(
+      within(panel).getByText(/validated connection identity/i),
+    ).toBeInTheDocument();
+    // …while the transport record is honestly gone with the session.
+    expect(
+      within(panel).getByText(/Transport not observed in this session/),
+    ).toBeInTheDocument();
+  });
+
+  it("for a message RECEIVED before the reload", async () => {
+    vi.spyOn(api, "fetchMessages").mockResolvedValue([]);
+    await renderSignedInOnConversation();
+    const socket = captured[0]!;
+
+    const received = msg("m-received", "2026-08-30T12:05:00.000Z", {
+      clientMessageId: "token-from-bob-7",
+      content: "received before reload",
+    });
+    act(() => {
+      socket.options.onEvent?.({ type: "NEW_MESSAGE", message: received });
+    });
+    await within(threadPane()).findByRole("button", {
+      name: "Message info: received before reload",
+    });
+
+    // RELOAD: the same message comes back from REST history, token intact.
+    await reloadIntoConversation([received]);
+
+    const user2 = userEvent.setup();
+    await user2.click(
+      await within(threadPane()).findByRole("button", {
+        name: "Message info: received before reload",
+      }),
+    );
+    const panel = inspectorPanel();
+    expect(within(panel).getByText("token-from-bob-7")).toBeInTheDocument();
+    expect(
+      within(panel).getByText(/Transport not observed in this session/),
+    ).toBeInTheDocument();
+  });
+});
+
+/**
+ * Task 7.5: below the 980px threshold the drawer OVERLAYS the thread — modal
+ * dialog semantics, a scrim, and focus confinement; crossing the threshold
+ * RE-PRESENTS the drawer in the other mode without losing the inspected
+ * message. These suites install a controllable matchMedia.
+ */
+describe("info drawer — overlay mode and threshold crossing (task 7.5)", () => {
+  const originalMatchMedia = window.matchMedia;
+  /** Mutable query results; `flip` dispatches real change events. */
+  const matchesByQuery = new Map<string, boolean>();
+  const listenersByQuery = new Map<string, Set<(event: MediaQueryListEvent) => void>>();
+
+  function installMatchMedia(overlayMatches: boolean): void {
+    matchesByQuery.clear();
+    listenersByQuery.clear();
+    matchesByQuery.set(INSPECTOR_OVERLAY_QUERY, overlayMatches);
+    window.matchMedia = ((query: string): MediaQueryList =>
+      ({
+        matches: matchesByQuery.get(query) ?? false,
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: (type: string, listener: EventListener) => {
+          if (type !== "change") return;
+          const set = listenersByQuery.get(query) ?? new Set();
+          set.add(listener as (event: MediaQueryListEvent) => void);
+          listenersByQuery.set(query, set);
+        },
+        removeEventListener: (type: string, listener: EventListener) => {
+          if (type !== "change") return;
+          listenersByQuery.get(query)?.delete(listener as (event: MediaQueryListEvent) => void);
+        },
+        dispatchEvent: () => false,
+      }) as MediaQueryList) as typeof window.matchMedia;
+  }
+
+  /** Flips the overlay query's result and notifies its subscribers. */
+  function flipOverlayQuery(matches: boolean): void {
+    matchesByQuery.set(INSPECTOR_OVERLAY_QUERY, matches);
+    const event = { matches } as MediaQueryListEvent;
+    for (const listener of listenersByQuery.get(INSPECTOR_OVERLAY_QUERY) ?? []) {
+      listener(event);
+    }
+  }
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+  });
+
+  it("overlays with a scrim and dialog semantics below the threshold, confines focus, and returns focus on close", async () => {
+    installMatchMedia(true);
+    vi.spyOn(api, "fetchMessages").mockResolvedValue([
+      msg("m1", "2026-08-30T11:58:00.000Z", { content: "first from bob" }),
+    ]);
+    const user = await renderSignedInOnConversation();
+
+    const affordance = within(threadPane()).getByRole("button", {
+      name: "Message info: first from bob",
+    });
+    await user.click(affordance);
+
+    // Dialog semantics + scrim.
+    const dialogPanel = await screen.findByRole("dialog", { name: "Info" });
+    expect(dialogPanel).toHaveAttribute("aria-modal", "true");
+    expect(
+      document.querySelector('button.scrim[aria-label="Close info"]'),
+    ).not.toBeNull();
+    // Focus moved inside on open (the close control).
+    const closeButton = within(dialogPanel).getByRole("button", { name: "Close info" });
+    expect(document.activeElement).toBe(closeButton);
+
+    // Focus confinement (task 7.5): the message record carries no other
+    // interactive element, so the close control is the only tab stop — Tab
+    // and Shift+Tab both WRAP onto it instead of escaping to the thread.
+    fireEvent.keyDown(closeButton, { key: "Tab", shiftKey: true });
+    expect(dialogPanel.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(closeButton);
+    fireEvent.keyDown(closeButton, { key: "Tab" });
+    expect(document.activeElement).toBe(closeButton);
+
+    // Escape dismisses and returns focus to the originating ⓘ.
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Info" })).not.toBeInTheDocument();
+    expect(
+      document.querySelector('button.scrim[aria-label="Close info"]'),
+    ).toBeNull();
+    expect(document.activeElement).toBe(affordance);
+  });
+
+  it("re-presents across the threshold rather than closing, retaining the inspected message", async () => {
+    installMatchMedia(true); // start overlayed
+    vi.spyOn(api, "fetchMessages").mockResolvedValue([
+      msg("m1", "2026-08-30T11:58:00.000Z", { content: "first from bob" }),
+    ]);
+    const user = await renderSignedInOnConversation();
+
+    await user.click(
+      within(threadPane()).getByRole("button", { name: "Message info: first from bob" }),
+    );
+    expect(await screen.findByRole("dialog", { name: "Info" })).toBeInTheDocument();
+
+    // Cross UP to docked: no dialog semantics, no scrim — but the drawer is
+    // still open ON THE SAME MESSAGE.
+    act(() => {
+      flipOverlayQuery(false);
+    });
+    expect(screen.queryByRole("dialog", { name: "Info" })).not.toBeInTheDocument();
+    expect(document.querySelector('button.scrim[aria-label="Close info"]')).toBeNull();
+    const dockedPanel = document.querySelector<HTMLElement>("#inspector-panel");
+    expect(dockedPanel).not.toBeNull();
+    expect(within(dockedPanel as HTMLElement).getByText("client-m1")).toBeInTheDocument();
+    expect(
+      threadPane().querySelector(".message-item--inspected"),
+    ).not.toBeNull();
+
+    // Cross back DOWN: dialog semantics return, message still inspected.
+    act(() => {
+      flipOverlayQuery(true);
+    });
+    const dialogPanel = await screen.findByRole("dialog", { name: "Info" });
+    expect(within(dialogPanel).getByText("client-m1")).toBeInTheDocument();
+    expect(
+      threadPane().querySelector(".message-item--inspected"),
+    ).not.toBeNull();
   });
 });

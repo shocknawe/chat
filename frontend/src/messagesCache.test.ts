@@ -26,6 +26,7 @@ function msg(id: string, createdAt: string, overrides: Partial<Message> = {}): M
     id,
     conversationId: CONVERSATION_ID,
     senderId: USER_ID,
+    clientMessageId: `client-${id}`,
     content: `content-${id}`,
     createdAt,
     ...overrides,

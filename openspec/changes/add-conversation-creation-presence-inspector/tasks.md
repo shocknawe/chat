@@ -86,16 +86,16 @@ is never cut (slices 2–4 depend on it to be demonstrable).
 ## 7. Slice 6 — Info drawer and correlation token
 
 - [x] 7.1 Add `clientMessageId` to the `Message` DTO in REST history and in `NEW_MESSAGE`/`MESSAGE_ACK` payloads. Keep `MessageAck.clientMessageId` at the event level (existing consumers correlate on it) and document in `docs/openapi.yaml` that for `MESSAGE_ACK` it is redundant with `message.clientMessageId`, retained for compatibility
-- [ ] 7.2 Add the `onCommandSent` instrumentation hook and the bounded session-scoped transport ledger (discard oldest first)
-- [ ] 7.3 Define the `InspectTarget` union (message vs connection/protocol view)
-- [ ] 7.4 Add the per-message ⓘ affordance (including own pending messages) and the thread-header inspector control; expose expanded state; distinguish the inspected message
-- [ ] 7.5 Implement the drawer: docked at ≥980px, overlaid with scrim and focus confinement below; re-present (not close) across the threshold, retaining the inspected message
-- [ ] 7.6 Return focus to the originating control on close (thread-header control if the originator is gone)
-- [ ] 7.7 Render the record: transport steps with observed timestamps, ids, correlation token, server/client timestamps, ordering key, content length against the documented maximum, protocol frames per the spec
-- [ ] 7.8 Implement the honesty rules: unobserved field renders absent; missing transport record states "not observed in this session"; acknowledgement stated as persistence (not delivery/reading), fan-out unverified
-- [ ] 7.9 Keep the drawer open and live-updating when the inspected message is acknowledged; clear the selection on conversation or identity change
-- [ ] 7.10 Test: the correlation token survives a reload for both sent and received messages
-- [ ] 7.11 Frontend tests: inspector focus return; dialog focus confinement and focus return
+- [x] 7.2 Add the `onCommandSent` instrumentation hook and the bounded session-scoped transport ledger (discard oldest first)
+- [x] 7.3 Define the `InspectTarget` union (message vs connection/protocol view)
+- [x] 7.4 Add the per-message ⓘ affordance (including own pending messages) and the thread-header inspector control; expose expanded state; distinguish the inspected message
+- [x] 7.5 Implement the drawer: docked at ≥980px, overlaid with scrim and focus confinement below; re-present (not close) across the threshold, retaining the inspected message
+- [x] 7.6 Return focus to the originating control on close (thread-header control if the originator is gone)
+- [x] 7.7 Render the record: transport steps with observed timestamps, ids, correlation token, server/client timestamps, ordering key, content length against the documented maximum, protocol frames per the spec
+- [x] 7.8 Implement the honesty rules: unobserved field renders absent; missing transport record states "not observed in this session"; acknowledgement stated as persistence (not delivery/reading), fan-out unverified
+- [x] 7.9 Keep the drawer open and live-updating when the inspected message is acknowledged; clear the selection on conversation or identity change
+- [x] 7.10 Test: the correlation token survives a reload for both sent and received messages
+- [x] 7.11 Frontend tests: inspector focus return; dialog focus confinement and focus return
 
 ## 8. Final verification
 

@@ -11,10 +11,12 @@
  *                     ERROR { clientMessageId?, code, reason }
  *                     PRESENCE { online: uuid[] }
  *
- * Server-authoritative messages (design.md): `clientMessageId` is only a
- * correlation/idempotency token; the `message` payload carried by MESSAGE_ACK
- * and NEW_MESSAGE is the authoritative shape `{ id, conversationId, senderId,
- * content, createdAt }` — identical to the REST DTO defined in `../api.ts`.
+ * Server-authoritative messages (design.md): `clientMessageId` is a
+ * correlation/idempotency token, never an identifier. Slice 6 (task 7.1)
+ * reversed the token's original non-exposure: the `message` payload carried by
+ * MESSAGE_ACK and NEW_MESSAGE is the authoritative shape `{ id,
+ * conversationId, senderId, clientMessageId, content, createdAt }` — identical
+ * to the REST DTO defined in `../api.ts`.
  *
  * There is deliberately no `senderId` field on the outbound command: the
  * backend derives the sender from the validated connection identity bound at
@@ -133,6 +135,9 @@ function isMessage(value: unknown): value is Message {
     typeof value.id === 'string' &&
     typeof value.conversationId === 'string' &&
     typeof value.senderId === 'string' &&
+    // Slice 6 (task 7.1): the correlation token ships ON the message, so a
+    // payload without it fails validation — never fabricate one downstream.
+    typeof value.clientMessageId === 'string' &&
     typeof value.content === 'string' &&
     typeof value.createdAt === 'string'
   )
@@ -183,7 +188,11 @@ export function parseInboundEvent(raw: string): InboundEvent | null {
 
   switch (json.type) {
     case 'MESSAGE_ACK': {
-      if (typeof json.clientMessageId !== 'string' || !isMessage(json.message)) {
+      if (
+        typeof json.clientMessageId !== 'string' ||
+        !isMessage(json.message) ||
+        json.clientMessageId !== json.message.clientMessageId
+      ) {
         return null
       }
       const event: MessageAckEvent = {

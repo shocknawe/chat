@@ -18,13 +18,20 @@ import {
 import { ConnectionStatus } from './components/ConnectionStatus'
 import { ConversationList, conversationLabel } from './components/ConversationList'
 import { CreateConversationDialog } from './components/CreateConversationDialog'
+import { InspectorDrawer } from './components/InspectorDrawer'
 import { ThreadPane } from './components/ThreadPane'
 import { UserSelectScreen } from './components/UserSelectScreen'
 import { useAnnouncer } from './hooks/useAnnouncer'
 import { useChatSocket } from './hooks/useChatSocket'
-import { COMPACT_QUERY, useMediaQuery } from './hooks/useMediaQuery'
+import { COMPACT_QUERY, INSPECTOR_OVERLAY_QUERY, useMediaQuery } from './hooks/useMediaQuery'
 import { type PendingMessage, usePendingMessages } from './hooks/usePendingMessages'
 import { useTheme } from './hooks/useTheme'
+import { useTransportLedger } from './hooks/useTransportLedger'
+import {
+  sameMessageKey,
+  type InspectMessageKey,
+  type InspectTarget,
+} from './inspector/transportLedger'
 import { initials } from './initials'
 import { patchConversationPreview, upsertAuthoritativeMessage } from './messagesCache'
 import { queryClient } from './queryClient'
@@ -163,6 +170,30 @@ type OverlayId = 'rail' | 'new-conversation'
 function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
   const { theme, toggleTheme } = useTheme()
   const isCompact = useMediaQuery(COMPACT_QUERY)
+  // Slice 6 (task 7.5): the 980px threshold, driving the drawer's docked vs
+  // overlaid presentation. The flag feeds the DOM (dialog semantics, scrim,
+  // grid column), so a crossing re-presents the open drawer — never closes it.
+  const isInspectorOverlay = useMediaQuery(INSPECTOR_OVERLAY_QUERY)
+
+  // Slice 6 (task 7.2): the session-scoped transport ledger. Placement is the
+  // scoping: this hook lives under the shell's `user.id` key, so identity
+  // switches and reloads start empty — the boundary the drawer states in words.
+  const { ledger, observeQueued, observeSent, observeEvent } = useTransportLedger()
+
+  /**
+   * Slice 6 (tasks 7.3–7.6, 7.9): the info drawer's open state. `null` is
+   * closed; otherwise the target is one message's record or the connection/
+   * protocol view (the thread-header control's view). The state is
+   * presentation-agnostic: crossing the 980px threshold only changes HOW the
+   * drawer is presented, so the inspected message is retained by construction.
+   */
+  const [inspection, setInspection] = useState<{ target: InspectTarget } | null>(null)
+  /** The control that opened (or last re-targeted) the drawer. */
+  const inspectorOriginRef = useRef<HTMLElement | null>(null)
+  /** The thread-header inspector control — the focus-return fallback (7.6). */
+  const inspectorControlRef = useRef<HTMLButtonElement | null>(null)
+  /** Set when a close must restore focus once the drawer's DOM is gone. */
+  const inspectorFocusReturnRef = useRef(false)
 
   // Task 2.6: exclusive overlay state; task 3.5 adds the creation dialog as
   // its second member. Opening an overlay records WHERE focus must return on
@@ -193,11 +224,15 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
   const dialogFromCompactRailRef = useRef(false)
 
   const openRailOverlay = useCallback(() => {
+    // The overlay system stays mutually exclusive with the drawer (slice 6):
+    // focus moves with the rail/dialog, so the inspector closes silently.
+    setInspection(null)
     returnFocusRef.current = railToggleRef.current
     setOpenOverlay('rail')
   }, [])
 
   const openNewConversation = useCallback(() => {
+    setInspection(null)
     returnFocusRef.current = newConversationRef.current
     dialogFromCompactRailRef.current = isCompact
     setOpenOverlay('new-conversation')
@@ -257,6 +292,90 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [openOverlay, closeOverlay])
 
+  /**
+   * Slice 6: the info drawer's state transitions.
+   *
+   * - Opening from a message's ⓘ records that control as the focus-return
+   *   target (task 7.6); activating the SAME message's ⓘ again toggles the
+   *   drawer closed (the one-shot design's behaviour).
+   * - The thread-header control toggles the drawer and always opens with NO
+   *   message selected — the connection/protocol view (spec: "Thread-header
+   *   control opens with no selection").
+   * - Closing always routes through the focus-returning path if the originator
+   *   still exists, else the thread-header control (task 7.6).
+   */
+  const closeInspector = useCallback(
+    (returnFocus: boolean) => {
+      if (returnFocus) inspectorFocusReturnRef.current = true
+      setInspection(null)
+      announce('Info closed')
+    },
+    [announce],
+  )
+
+  /** Close any open overlay WITHOUT the focus-return machinery — focus is about to move onto an inspector control. */
+  const dismissOverlaysSilently = useCallback(() => {
+    dialogFromCompactRailRef.current = false
+    setOpenOverlay(null)
+  }, [])
+
+  const handleInspectMessage = useCallback(
+    (key: InspectMessageKey, origin: HTMLElement) => {
+      dismissOverlaysSilently() // overlays are mutually exclusive (task 2.6)
+      const isSameTarget =
+        inspection?.target.kind === 'message' && sameMessageKey(inspection.target.key, key)
+      if (isSameTarget) {
+        // Toggle-close: focus is already ON the origin control, and the
+        // effect below re-centres it once the drawer's DOM is gone.
+        closeInspector(true)
+        return
+      }
+      inspectorOriginRef.current = origin
+      setInspection({ target: { kind: 'message', key } })
+      announce('Info opened')
+    },
+    [inspection, closeInspector, dismissOverlaysSilently, announce],
+  )
+
+  const handleToggleInspector = useCallback(() => {
+    if (inspection !== null) {
+      closeInspector(true)
+      return
+    }
+    dismissOverlaysSilently()
+    inspectorOriginRef.current = inspectorControlRef.current
+    setInspection({ target: { kind: 'connection' } })
+    announce('Info opened')
+  }, [inspection, closeInspector, dismissOverlaysSilently, announce])
+
+  // Deferred focus return (task 7.6): runs after the closing commit so the
+  // drawer's DOM is gone before focus lands. The originator wins while it
+  // still exists (task-7.9 acks/removals can take it away); otherwise focus
+  // falls back to the thread-header inspector control.
+  useEffect(() => {
+    if (!inspectorFocusReturnRef.current) return
+    inspectorFocusReturnRef.current = false
+    const origin = inspectorOriginRef.current
+    inspectorOriginRef.current = null
+    const target = origin !== null && document.contains(origin) ? origin : inspectorControlRef.current
+    target?.focus()
+  })
+
+  // Dismiss key for the drawer, in both presentations (the one-shot closes
+  // Info on Escape docked and overlaid alike). Mutually exclusive with the
+  // overlay Escape effect above: opening the inspector dismisses overlays.
+  useEffect(() => {
+    if (inspection === null) return
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeInspector(true)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [inspection, closeInspector])
+
   // Pending outbound items (task 6.3): optimistic messages with no server id
   // yet, held OUTSIDE the TanStack cache. State is lifted here — the common
   // ancestor of ThreadPane (renders it) and the socket handlers (6.4 mutates
@@ -279,16 +398,29 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
    */
   const handleMessageAck = useCallback(
     (event: MessageAckEvent) => {
+      // Task 7.2: the acknowledgement is a ledger observation (step + frame).
+      observeEvent(event)
       removePending(event.clientMessageId)
       upsertAuthoritativeMessage(user.id, event.message)
       // Task 4.4: the acknowledged message becomes the conversation's rail
       // preview (cache patch, no listing refetch). With the pending item gone,
       // the override retires and the row reads the server tail.
       patchConversationPreview(user.id, event.message)
+      // Task 7.9: if the INSPECTED message is the one just acknowledged, re-key
+      // the open inspection to its server identity — the drawer keeps showing
+      // the record (now with server id/timestamp), it never closes on an ack.
+      setInspection((prev) =>
+        prev !== null &&
+        prev.target.kind === 'message' &&
+        prev.target.key.by === 'clientMessageId' &&
+        prev.target.key.clientMessageId === event.clientMessageId
+          ? { target: { kind: 'message', key: { by: 'id', messageId: event.message.id } } }
+          : prev,
+      )
       // Task 2.7: delivery-status change, announced in words.
       announce('Message sent')
     },
-    [removePending, user.id, announce],
+    [removePending, user.id, announce, observeEvent],
   )
 
   /**
@@ -305,6 +437,9 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
   const handleRealtimeError = useCallback(
     (event: ErrorEvent) => {
       if (event.clientMessageId !== undefined) {
+        // Task 7.2: a correlated rejection is a ledger observation (the
+        // uncorrelated kind names no message and is not recorded).
+        observeEvent(event)
         markPendingFailed(event.clientMessageId, { code: event.code, reason: event.reason })
         // Task 2.7: delivery-status change, announced in words.
         announce('Message failed to send')
@@ -312,7 +447,7 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
       }
       console.warn(`[chat] uncorrelated realtime error ${event.code}: ${event.reason}`)
     },
-    [markPendingFailed, announce],
+    [markPendingFailed, announce, observeEvent],
   )
 
   /**
@@ -341,10 +476,13 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
    */
   const handleNewMessage = useCallback(
     (event: NewMessageEvent) => {
+      // Task 7.2: a delivered message is a ledger observation, keyed by its
+      // server id (the sender's token ships on the message, task 7.1).
+      observeEvent(event)
       upsertAuthoritativeMessage(user.id, event.message)
       patchConversationPreview(user.id, event.message)
     },
-    [user.id],
+    [user.id, observeEvent],
   )
 
   /**
@@ -401,14 +539,18 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
    */
   const handleSendMessage = (conversationId: string, content: string): void => {
     const clientMessageId = crypto.randomUUID()
+    const createdAt = new Date().toISOString()
     addPending({
       clientMessageId,
       conversationId,
       senderId: user.id,
       content,
-      createdAt: new Date().toISOString(),
+      createdAt,
       status: 'pending',
     })
+    // Task 7.2: the "queued" observation precedes the wire write (which the
+    // socket's onCommandSent hook may report synchronously below).
+    observeQueued({ clientMessageId, conversationId, content })
     sendMessage({ clientMessageId, conversationId, content })
   }
 
@@ -526,14 +668,18 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
   // the task-6.6 availability indicator and the reconnect history refresh.
   // Slice 5: `reconnectNow` backs the "Reconnect now" control (6.1) and
   // `dropConnection` backs the DEV-only demo cut (6.5).
-  const { sendMessage, connectionState, reconnectNow, dropConnection } = useChatSocket(user.id, {
-    onMessageAck: handleMessageAck,
-    onNewMessage: handleNewMessage,
-    onRealtimeError: handleRealtimeError,
-    onConversationCreated: handleConversationCreated,
-    onPresence: handlePresence,
-    onStateChange: handleConnectionStateChange,
-  })
+  const { sendMessage, connectionState, reconnectNow, dropConnection, pendingCount } =
+    useChatSocket(user.id, {
+      onMessageAck: handleMessageAck,
+      onNewMessage: handleNewMessage,
+      onRealtimeError: handleRealtimeError,
+      onConversationCreated: handleConversationCreated,
+      onPresence: handlePresence,
+      onStateChange: handleConnectionStateChange,
+      // Task 7.2: every frame the socket actually writes becomes a ledger
+      // "sent" observation, stamped at the write by the socket itself.
+      onCommandSent: observeSent,
+    })
 
   /**
    * Task 6.8: the ONLY path back for a rejected message — the per-bubble
@@ -553,6 +699,13 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
   const handleRetryMessage = useCallback(
     (pending: PendingMessage) => {
       markPendingRetry(pending.clientMessageId)
+      // Task 7.2: the manual retry re-queues under the ORIGINAL token — the
+      // ledger appends it to the same record rather than starting a new one.
+      observeQueued({
+        clientMessageId: pending.clientMessageId,
+        conversationId: pending.conversationId,
+        content: pending.content,
+      })
       sendMessage({
         clientMessageId: pending.clientMessageId,
         conversationId: pending.conversationId,
@@ -561,7 +714,7 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
       // Task 2.7: delivery-status change, announced in words.
       announce('Trying to send the message again')
     },
-    [markPendingRetry, sendMessage, announce],
+    [markPendingRetry, sendMessage, announce, observeQueued],
   )
 
   /**
@@ -638,6 +791,20 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
       setSelectedConversationId(null)
     }
   }, [conversationsQuery.data, selectedConversationId, user.id])
+
+  // Task 7.9: selecting a DIFFERENT conversation clears the inspected message
+  // selection (the record belongs to the old thread). The drawer itself stays
+  // open in its no-selection view — connection and protocol facts are scoped
+  // to the session, not to the conversation. Identity changes remount the
+  // whole shell (keyed on user.id), which resets this state wholesale.
+  const prevSelectedConversationRef = useRef<string | null>(selectedConversationId)
+  useEffect(() => {
+    if (prevSelectedConversationRef.current === selectedConversationId) return
+    prevSelectedConversationRef.current = selectedConversationId
+    setInspection((prev) =>
+      prev !== null && prev.target.kind === 'message' ? { target: { kind: 'connection' } } : prev,
+    )
+  }, [selectedConversationId])
 
   const handleSelectConversation = (conversationId: string) => {
     storeConversationId(user.id, conversationId)
@@ -750,7 +917,17 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
           </button>
         </div>
       </header>
-      <main id="main-content" className="shell-body" tabIndex={-1}>
+      {/* Task 7.5: docking adds the third grid column (the drawer). Overlay
+          mode never does — the panel is fixed-positioned and out of flow. */}
+      <main
+        id="main-content"
+        className={
+          inspection !== null && selectedConversation !== null && !isInspectorOverlay
+            ? 'shell-body shell-body--inspector-open'
+            : 'shell-body'
+        }
+        tabIndex={-1}
+      >
         <ConversationList
           currentUserId={user.id}
           conversations={conversationsQuery.data}
@@ -782,7 +959,31 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
               handleSendMessage(selectedConversation.id, content)
             }
           }}
+          inspectorOpen={inspection !== null}
+          inspectedKey={
+            inspection?.target.kind === 'message' ? inspection.target.key : null
+          }
+          onInspectMessage={handleInspectMessage}
+          onToggleInspector={handleToggleInspector}
+          inspectorControlRef={inspectorControlRef}
         />
+        {/* Slice 6 (tasks 7.5–7.9): the info drawer. It renders only while a
+            conversation is selected (every entry point requires one) and only
+            while open — the threshold decides presentation, never existence,
+            so crossing it keeps the inspected message (no unmount of state). */}
+        {inspection !== null && selectedConversation !== null && (
+          <InspectorDrawer
+            target={inspection.target}
+            overlay={isInspectorOverlay}
+            currentUser={user}
+            conversation={selectedConversation}
+            pendingMessages={pendingMessages}
+            ledger={ledger}
+            connectionState={connectionState}
+            getPendingCommandCount={pendingCount}
+            onClose={() => closeInspector(true)}
+          />
+        )}
       </main>
       {/* Task 3.5: the creation dialog is the overlay state machine's second
           modal. It renders only while it IS the open overlay (single-overlay
@@ -799,6 +1000,17 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
           doubles as the visual cue that the rail is modal while open. */}
       {isRailOpen && (
         <button type="button" className="scrim" aria-label="Close conversations" onClick={closeOverlay} />
+      )}
+      {/* Task 7.5: below the 980px threshold the open inspector overlays the
+          thread with a scrim — the same dismissal-and-cue surface as the
+          rail's, routing through the same focus-returning close. */}
+      {inspection !== null && selectedConversation !== null && isInspectorOverlay && (
+        <button
+          type="button"
+          className="scrim"
+          aria-label="Close info"
+          onClick={() => closeInspector(true)}
+        />
       )}
     </div>
   )

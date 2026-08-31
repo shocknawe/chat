@@ -8,7 +8,10 @@
  * commands in memory for idempotent retry, and clean up on demand. Slice 5
  * (tasks 6.1, 6.1a, 6.5) adds `reconnectNow()` (immediate dial with strict
  * no-ops), the one-live-socket guarantee in `connect()`, and `dropConnection()`
- * (non-1000 cut whose close event re-engages the reconnect path).
+ * (non-1000 cut whose close event re-engages the reconnect path). Slice 6
+ * (task 7.2) adds the `onCommandSent` instrumentation hook: one dispatch per
+ * SEND_MESSAGE frame actually written to an open socket, feeding the info
+ * drawer's session-scoped transport ledger.
  *
  * Deliberately free of any React (or other framework) import: React wiring in
  * task 6.2 consumes the factory + callbacks below and nothing else.
@@ -93,6 +96,15 @@ export interface ChatSocketOptions {
   reconnect?: ReconnectConfig
   /** Dispatched once per validated inbound event (`InboundEvent`). */
   onEvent?: (event: InboundEvent) => void
+  /**
+   * Slice 6 (task 7.2): instrumentation hook fired at the exact moment a
+   * SEND_MESSAGE command is WRITTEN to an open socket — immediate sends and
+   * every reconnect-queue flush alike. This is the client's one honest
+   * "the frame left this window" signal; the info drawer's transport ledger
+   * records each call as an observed step (a reconnect re-send is therefore
+   * observed as its own step, never merged or fabricated).
+   */
+  onCommandSent?: (command: Omit<SendMessageCommand, 'type'>, sentAt: string) => void
   /** Dispatched on every connection-state transition. */
   onStateChange?: (state: ConnectionState) => void
   /** Dispatched for malformed inbound frames and transport errors. Never throws. */
@@ -234,6 +246,9 @@ export function createChatSocket(options: ChatSocketOptions): ChatSocket {
     for (const entry of pendingById.values()) {
       try {
         socket.send(entry.wire)
+        // Task 7.2: instrument the actual wire write — after `send` returns
+        // without throwing, the frame is handed to the browser's transport.
+        options.onCommandSent?.(entry.command, new Date().toISOString())
       } catch {
         // A failed send here means the socket is dying; the imminent close
         // event will schedule a reconnect and we flush again afterwards.

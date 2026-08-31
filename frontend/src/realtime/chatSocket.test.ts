@@ -73,6 +73,8 @@ function ackWire(clientMessageId: string): string {
       id: 'server-1',
       conversationId: 'conv-1',
       senderId: 'user-1',
+      // Task 7.1: the correlation token is required on the message payload.
+      clientMessageId,
       content: 'hi',
       createdAt: '2026-08-30T12:00:00.000Z',
     },
@@ -467,5 +469,83 @@ describe('unacknowledged command retry', () => {
     expect(socket.pendingCount()).toBe(1)
     expect(first?.sent).toHaveLength(1)
     expect(lastSentCommand(first as FakeWebSocket).content).toBe('hello')
+  })
+})
+
+/**
+ * Slice 6 (OpenSpec task 7.2): the `onCommandSent` instrumentation hook —
+ * one dispatch per SEND_MESSAGE frame actually WRITTEN to an open socket,
+ * feeding the info drawer's session-scoped transport ledger.
+ */
+describe('onCommandSent instrumentation (task 7.2)', () => {
+  it('fires once per immediate wire write, with the command and a timestamp', () => {
+    const onCommandSent = vi.fn()
+    const socket = createChatSocket({
+      userId: 'user-1',
+      url: 'ws://test/ws',
+      onCommandSent,
+    })
+    sockets.push(socket)
+    FakeWebSocket.instances[0]?.simulateOpen()
+
+    socket.sendMessage({ clientMessageId: 'client-1', conversationId: 'conv-1', content: 'hello' })
+
+    expect(onCommandSent).toHaveBeenCalledTimes(1)
+    const [command, sentAt] = onCommandSent.mock.calls[0] as [
+      Omit<SendMessageCommand, 'type'>,
+      string,
+    ]
+    expect(command).toEqual({ clientMessageId: 'client-1', conversationId: 'conv-1', content: 'hello' })
+    // The stamp is an observed instant, never absent.
+    expect(Number.isNaN(Date.parse(sentAt))).toBe(false)
+  })
+
+  it('does NOT fire while queued offline, and fires again for the reconnect flush (each re-send is its own observation)', async () => {
+    const onCommandSent = vi.fn()
+    const socket = createChatSocket({
+      userId: 'user-1',
+      url: 'ws://test/ws',
+      reconnect: { baseDelayMs: 1000, jitterFraction: 0 },
+      onCommandSent,
+    })
+    sockets.push(socket)
+
+    // Submitted while CONNECTING: queued, nothing written, no observation.
+    socket.sendMessage({ clientMessageId: 'client-1', conversationId: 'conv-1', content: 'queued' })
+    expect(onCommandSent).not.toHaveBeenCalled()
+
+    // First connection writes it once.
+    FakeWebSocket.instances[0]?.simulateOpen()
+    expect(onCommandSent).toHaveBeenCalledTimes(1)
+
+    // An unexpected drop and reconnect RE-SENDS under the same token — a
+    // second, separate observation (the ledger keeps both, honestly).
+    FakeWebSocket.instances[0]?.simulateUnexpectedClose()
+    await vi.advanceTimersByTimeAsync(1000)
+    FakeWebSocket.instances[1]?.simulateOpen()
+    expect(onCommandSent).toHaveBeenCalledTimes(2)
+    const [resentCommand] = onCommandSent.mock.calls[1] as [Omit<SendMessageCommand, 'type'>]
+    expect(resentCommand.clientMessageId).toBe('client-1')
+  })
+
+  it('never fires for an acknowledge command on a later reconnect (acked commands are not re-sent)', async () => {
+    const onCommandSent = vi.fn()
+    const socket = createChatSocket({
+      userId: 'user-1',
+      url: 'ws://test/ws',
+      reconnect: { baseDelayMs: 1000, jitterFraction: 0 },
+      onCommandSent,
+    })
+    sockets.push(socket)
+    FakeWebSocket.instances[0]?.simulateOpen()
+
+    socket.sendMessage({ clientMessageId: 'client-1', conversationId: 'conv-1', content: 'hello' })
+    FakeWebSocket.instances[0]?.simulateMessage(ackWire('client-1'))
+    expect(onCommandSent).toHaveBeenCalledTimes(1)
+
+    FakeWebSocket.instances[0]?.simulateUnexpectedClose()
+    await vi.advanceTimersByTimeAsync(1000)
+    FakeWebSocket.instances[1]?.simulateOpen()
+    expect(onCommandSent).toHaveBeenCalledTimes(1) // nothing re-sent, nothing re-observed
   })
 })

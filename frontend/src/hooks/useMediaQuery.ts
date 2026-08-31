@@ -22,3 +22,12 @@ export function useMediaQuery(query: string): boolean {
 
 /** The compact-viewport threshold below which the rail becomes an overlay (task 2.6). */
 export const COMPACT_QUERY = '(max-width: 720px)'
+
+/**
+ * Slice 6 (task 7.5): BELOW this query's bound the open inspector overlays the
+ * thread with a scrim and focus confinement; at or above 980px it docks
+ * beside the thread. The JS flag owns presentation (dialog semantics, scrim,
+ * confinement) and the CSS class switch follows it, so threshold crossings
+ * re-present the drawer — never close it — with the inspected message retained.
+ */
+export const INSPECTOR_OVERLAY_QUERY = '(max-width: 979px)'

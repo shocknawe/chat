@@ -9,10 +9,14 @@ import { describe, expect, it } from 'vitest'
 import type { Message } from '../api'
 import { ERROR_CODES, parseInboundEvent, serializeCommand } from './protocol'
 
+// Slice 6 (task 7.1): the correlation token is REQUIRED on the message
+// payload — a message without one fails validation rather than being given a
+// fabricated token downstream.
 const message: Message = {
   id: 'msg-1',
   conversationId: 'conv-1',
   senderId: 'user-1',
+  clientMessageId: 'client-9',
   content: 'hello',
   createdAt: '2026-08-30T12:00:00.000Z',
 }
@@ -46,10 +50,10 @@ describe('serializeCommand', () => {
 
 describe('parseInboundEvent — MESSAGE_ACK', () => {
   it('parses a valid frame', () => {
-    const raw = JSON.stringify({ type: 'MESSAGE_ACK', clientMessageId: 'client-1', message })
+    const raw = JSON.stringify({ type: 'MESSAGE_ACK', clientMessageId: 'client-9', message })
     expect(parseInboundEvent(raw)).toEqual({
       type: 'MESSAGE_ACK',
-      clientMessageId: 'client-1',
+      clientMessageId: 'client-9',
       message,
     })
   })
@@ -72,6 +76,11 @@ describe('parseInboundEvent — MESSAGE_ACK', () => {
     })
     expect(parseInboundEvent(raw)).toBeNull()
   })
+
+  it('rejects mismatched event-level and message-level correlation tokens', () => {
+    const raw = JSON.stringify({ type: 'MESSAGE_ACK', clientMessageId: 'client-other', message })
+    expect(parseInboundEvent(raw)).toBeNull()
+  })
 })
 
 describe('parseInboundEvent — NEW_MESSAGE', () => {
@@ -88,6 +97,12 @@ describe('parseInboundEvent — NEW_MESSAGE', () => {
   it('rejects a message payload missing a required field', () => {
     const { senderId: _senderId, ...withoutSenderId } = message
     const raw = JSON.stringify({ type: 'NEW_MESSAGE', message: withoutSenderId })
+    expect(parseInboundEvent(raw)).toBeNull()
+  })
+
+  it('rejects a message payload missing clientMessageId (task 7.1: the token now ships on the message)', () => {
+    const { clientMessageId: _clientMessageId, ...withoutToken } = message
+    const raw = JSON.stringify({ type: 'NEW_MESSAGE', message: withoutToken })
     expect(parseInboundEvent(raw)).toBeNull()
   })
 })

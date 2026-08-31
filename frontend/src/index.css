@@ -1465,6 +1465,480 @@ body[data-theme='dark'] .identity-tile {
   font-weight: 800;
 }
 
+/* ── Inspector drawer (slice 6, tasks 7.4–7.9) ────────────────────────
+   Visual source: docs/one-shot/oneshot-info-drawer.html's `info` panel —
+   brand-gradient top strip, lifecycle timeline, fact rows, wire frames, and
+   the caveat strip — carried onto this shell's class names. Two
+   presentations, one component (task 7.5): DOCKED beside the thread at and
+   above 980px (the shell adds the third grid column), OVERLAID with a scrim
+   below it (fixed to the right edge). Crossing the threshold never unmounts
+   the drawer, so the inspected message is retained by construction. */
+
+:root {
+  --inspector-width: 338px;
+}
+
+@media (max-width: 1180px) {
+  :root {
+    --inspector-width: 314px;
+  }
+}
+
+/* Docked: the shell body gains the drawer's column. */
+.shell-body--inspector-open {
+  grid-template-columns: var(--rail-width) minmax(0, 1fr) var(--inspector-width);
+}
+
+.inspector-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 10px;
+  background: rgba(244, 249, 255, 0.94);
+}
+
+body[data-theme='dark'] .inspector-panel {
+  background: rgba(18, 12, 31, 0.96);
+}
+
+/* The brand strip identifies the panel, as on the one-shot. */
+.inspector-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--brand-gradient);
+}
+
+/* Overlaid below the 980px threshold: fixed to the right edge over the
+   thread (the shell renders the scrim). In docked mode this class is absent
+   and the panel is an ordinary grid child. */
+.inspector-panel--overlay {
+  position: fixed;
+  top: var(--header-height);
+  right: 10px;
+  bottom: 10px;
+  z-index: 70;
+  width: min(88vw, 352px);
+  border-radius: 18px;
+  box-shadow: -24px 0 60px -34px rgba(42, 78, 122, 0.7);
+}
+
+body[data-theme='dark'] .inspector-panel--overlay {
+  box-shadow: -24px 0 60px -30px rgba(0, 0, 0, 0.9);
+}
+
+.inspector-head {
+  flex: none;
+  padding: 15px 16px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.inspector-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.inspector-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.inspector-close {
+  flex: none;
+  min-width: 38px;
+  min-height: 38px;
+  border-radius: 10px;
+}
+
+.inspector-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 16px 22px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.inspector-section {
+  padding-top: 16px;
+}
+
+.inspector-section + .inspector-section {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.inspector-section-title {
+  margin: 0 0 10px;
+  color: var(--ink-3);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Subject — which message this record belongs to. */
+.inspector-subject {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+body[data-theme='dark'] .inspector-subject {
+  background: var(--blue-soft);
+}
+
+.inspector-subject-who {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.inspector-subject-text {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Lifecycle timeline. The node colour is a SECOND signal — the state word
+   sits in the label/note text (Status-Is-Text). */
+.inspector-step-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inspector-step {
+  position: relative;
+  padding: 0 0 16px 24px;
+}
+
+.inspector-step::before {
+  content: '';
+  position: absolute;
+  top: 15px;
+  bottom: 1px;
+  left: 5px;
+  width: 1px;
+  background: var(--line);
+}
+
+.inspector-step:last-child {
+  padding-bottom: 0;
+}
+
+.inspector-step:last-child::before {
+  display: none;
+}
+
+.inspector-step-node {
+  position: absolute;
+  left: 1px;
+  top: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent);
+}
+
+.inspector-step[data-state='failed'] .inspector-step-node {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+.inspector-step[data-state='waiting'] .inspector-step-node,
+.inspector-step[data-state='unverified'] .inspector-step-node {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  box-shadow: none;
+}
+
+.inspector-step-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inspector-step-label {
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.inspector-step[data-state='waiting'] .inspector-step-label,
+.inspector-step[data-state='unverified'] .inspector-step-label {
+  color: var(--ink-3);
+}
+
+.inspector-step[data-state='failed'] .inspector-step-label {
+  color: var(--danger);
+}
+
+.inspector-step-stamp {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 10px;
+}
+
+.inspector-step-note {
+  margin: 3px 0 0;
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* Fact rows: label above a mono value; an unobserved value is ABSENT (muted
+   dash), never fabricated (task 7.8). */
+.inspector-fact-list {
+  margin: 0;
+}
+
+.inspector-fact + .inspector-fact {
+  margin-top: 10px;
+}
+
+.inspector-fact-label {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.inspector-fact-value {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.inspector-fact-value--absent {
+  color: var(--ink-3);
+}
+
+.inspector-fact-note {
+  margin: 3px 0 0;
+  color: var(--ink-3);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+/* The missing-record statement (task 7.8): stated, not dashed. */
+.inspector-absent {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  color: var(--ink-2);
+  background: var(--blue-soft);
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0 10px 10px 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Wire frames: name chip over the exact payload as it crossed the wire. */
+.inspector-frame + .inspector-frame {
+  margin-top: 10px;
+}
+
+.inspector-frame {
+  margin-top: 10px;
+}
+
+.inspector-frame-name {
+  display: inline-block;
+  margin-bottom: 5px;
+  padding: 2px 7px;
+  color: var(--brand-ink);
+  background: #f3eaf5;
+  border: 1px solid #dbc5df;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+body[data-theme='dark'] .inspector-frame-name {
+  color: #e2c9e9;
+  background: #2c1c34;
+  border-color: #5e3b68;
+}
+
+.inspector-frame-json {
+  margin: 0;
+  padding: 10px;
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+body[data-theme='dark'] .inspector-frame-json {
+  background: var(--blue-soft);
+}
+
+/* The honesty caveat strip (task 7.8). */
+.inspector-caveat {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  color: var(--ink-2);
+  background: var(--blue-soft);
+  border-left: 2px solid var(--line-strong);
+  border-radius: 0 10px 10px 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.inspector-empty {
+  min-height: 140px;
+  display: grid;
+  place-items: center;
+  padding: 24px 8px;
+  color: var(--ink-3);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* The ⓘ affordance beside every message (task 7.4), including own pending
+   ones. Pointer devices get a quiet glyph that the row reveals and the
+   button confirms; touch keeps it legible. */
+.message-item {
+  width: fit-content;
+  max-width: min(76%, calc(72ch + 44px));
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.message-group--own .message-item {
+  flex-direction: row-reverse;
+}
+
+.message-item .message-bubble {
+  flex: 0 1 auto;
+  min-width: 0;
+  /* The width clamp lives on the item (which must also fit the ⓘ button). */
+  max-width: none;
+}
+
+/* The inspected message is visually distinguished (spec "Inspecting a
+   message distinguishes it") — a brand ring around its bubble. */
+.message-item--inspected .message-bubble {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 42%, transparent);
+}
+
+.info-button {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--ink-3);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    opacity 0.18s var(--ease);
+}
+
+.info-button::before {
+  content: '';
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: var(--blue-mist);
+  opacity: 0;
+  transform: scale(0.55);
+  transition:
+    opacity 0.18s var(--ease),
+    transform 0.24s var(--ease),
+    border-color 0.18s var(--ease);
+}
+
+.info-button .icon {
+  position: relative;
+  width: 16px;
+  height: 16px;
+}
+
+@media (hover: hover) {
+  .info-button {
+    opacity: 0.55;
+  }
+
+  .message-item:hover .info-button {
+    opacity: 0.85;
+  }
+}
+
+.info-button:hover,
+.info-button:focus-visible,
+.info-button[aria-expanded='true'] {
+  opacity: 1;
+  color: var(--brand-ink);
+}
+
+.info-button:hover::before,
+.info-button:focus-visible::before,
+.info-button[aria-expanded='true']::before {
+  opacity: 1;
+  transform: scale(1);
+  background: #f3eaf5;
+  border-color: #cdaed3;
+}
+
+body[data-theme='dark'] .info-button:hover::before,
+body[data-theme='dark'] .info-button:focus-visible::before,
+body[data-theme='dark'] .info-button[aria-expanded='true']::before {
+  background: #2c1c34;
+  border-color: #5e3b68;
+}
+
+/* The thread-header inspector control reads active while its panel is open. */
+.thread-inspector-toggle[aria-expanded='true'] {
+  color: var(--brand-ink);
+  background: #f6edf8;
+  border-color: #cdaed3;
+}
+
+body[data-theme='dark'] .thread-inspector-toggle[aria-expanded='true'] {
+  background: #2c1c34;
+  border-color: #5e3b68;
+}
+
+/* Mono numerals/ids inside the drawer. */
+.data {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
 /* ── Presence (task 5.5): dot plus WORD, in both states ─────────────── */
 /* Status-Is-Text: the uppercase word is the state's carrier — for sighted
    users and assistive technology alike — and the dot is colour behind the

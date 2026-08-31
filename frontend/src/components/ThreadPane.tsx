@@ -8,6 +8,7 @@ import {
 import { conversationLabel } from './ConversationList'
 import { Composer } from './Composer'
 import type { PendingMessage } from '../hooks/usePendingMessages'
+import type { InspectMessageKey } from '../inspector/transportLedger'
 import { initials } from '../initials'
 import { compareMessages } from '../messageOrder'
 import { fetchMergedHistory } from '../messagesCache'
@@ -146,6 +147,27 @@ interface ThreadPaneProps {
    * conversation is created via the `+` dialog, focus moves here.
    */
   composerFocusRef?: MutableRefObject<HTMLTextAreaElement | null>
+  /**
+   * Slice 6 (task 7.4): whether the info drawer is open at all (drives the
+   * header control's `aria-expanded`; per-message affordances are expanded
+   * only while THEIR message is the inspected one).
+   */
+  inspectorOpen: boolean
+  /** The inspected message's identity, or null when none/connection view. */
+  inspectedKey: InspectMessageKey | null
+  /**
+   * Task 7.4: opens (or re-targets) the drawer on one message's record.
+   * `origin` is the pressed ⓘ control — its element identity is the focus-
+   * return target on close (task 7.6).
+   */
+  onInspectMessage: (key: InspectMessageKey, origin: HTMLElement) => void
+  /** The thread-header control: toggles the drawer on the connection view. */
+  onToggleInspector: () => void
+  /**
+   * Handle to the thread-header inspector control (task 7.6): the focus-return
+   * fallback when a closing drawer's originator no longer exists.
+   */
+  inspectorControlRef: MutableRefObject<HTMLButtonElement | null>
 }
 
 export function ThreadPane({
@@ -158,6 +180,11 @@ export function ThreadPane({
   onRetryMessage,
   onSendMessage,
   composerFocusRef,
+  inspectorOpen,
+  inspectedKey,
+  onInspectMessage,
+  onToggleInspector,
+  inspectorControlRef,
 }: ThreadPaneProps) {
   // Task 6.7: history lands through the REST↔realtime MERGE, not a blind
   // overwrite. `fetchMergedHistory` unions the response with whatever ack /
@@ -275,14 +302,20 @@ export function ThreadPane({
               signal — presence lands in a later slice. */}
           <p className="meta thread-subtitle">Direct message</p>
         </div>
-        {/* Inspector control PLACEHOLDER (task 2.3 / design.md decision 7):
-            the real info drawer is Slice 6. This reserves its position and
-            is deliberately non-functional here. */}
+        {/* Slice 6 (tasks 7.4–7.6): the thread-header inspector control. It
+            toggles the drawer with NO message selected (the connection and
+            protocol view), exposes its expanded state, and — via
+            `inspectorControlRef` — is the focus-return fallback when a closing
+            drawer's opening control no longer exists. */}
         <button
+          ref={inspectorControlRef}
           type="button"
           className="icon-button thread-inspector-toggle"
           aria-label="Conversation info"
           title="Conversation info"
+          aria-expanded={inspectorOpen}
+          aria-controls="inspector-panel"
+          onClick={onToggleInspector}
         >
           <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
             <path
@@ -416,6 +449,13 @@ export function ThreadPane({
                         )}
                         {group.messages.map((message, index) => {
                           const isLast = index === group.messages.length - 1
+                          // Slice 6 (task 7.4): the inspected message is
+                          // distinguished visually (the ring lands on the
+                          // bubble) and its ⓘ affordance is expanded.
+                          const isInspected =
+                            inspectorOpen &&
+                            inspectedKey?.by === 'id' &&
+                            inspectedKey.messageId === message.id
                           const classes = [
                             'message-bubble',
                             isOwn ? 'message-bubble--own' : 'message-bubble--other',
@@ -428,9 +468,39 @@ export function ThreadPane({
                             .filter((c) => c !== '')
                             .join(' ')
                           return (
-                            <p key={message.id} className={classes}>
-                              {message.content}
-                            </p>
+                            <div
+                              key={message.id}
+                              className={
+                                isInspected
+                                  ? 'message-item message-item--inspected'
+                                  : 'message-item'
+                              }
+                            >
+                              <p className={classes}>{message.content}</p>
+                              {/* Task 7.4: the accessibly named ⓘ affordance on
+                                  EVERY message. `origin` (currentTarget) is the
+                                  focus-return target on drawer close (7.6). */}
+                              <button
+                                type="button"
+                                className="info-button"
+                                aria-label={`Message info: ${message.content}`}
+                                title="Message info"
+                                aria-expanded={isInspected}
+                                aria-controls="inspector-panel"
+                                onClick={(event) =>
+                                  onInspectMessage(
+                                    { by: 'id', messageId: message.id },
+                                    event.currentTarget,
+                                  )
+                                }
+                              >
+                                <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+                                  <circle cx="12" cy="12" r="9" />
+                                  <path d="M12 11v5" />
+                                  <path d="M12 7.6v.6" />
+                                </svg>
+                              </button>
+                            </div>
                           )
                         })}
                         {/* Delivery status stated in words (task 2.3 / spec
@@ -468,9 +538,46 @@ export function ThreadPane({
                         the submission is manual, under the original token. */}
                     {threadPending.map((pending) => (
                       <Fragment key={pending.clientMessageId}>
-                        <p className="message-bubble message-bubble--own message-bubble--pending">
-                          {pending.content}
-                        </p>
+                        <div
+                          className={
+                            inspectorOpen &&
+                            inspectedKey?.by === 'clientMessageId' &&
+                            inspectedKey.clientMessageId === pending.clientMessageId
+                              ? 'message-item message-item--inspected'
+                              : 'message-item'
+                          }
+                        >
+                          <p className="message-bubble message-bubble--own message-bubble--pending">
+                            {pending.content}
+                          </p>
+                          {/* Task 7.4: own PENDING messages carry the same ⓘ
+                              affordance — keyed by their correlation token
+                              until the ack re-keys the inspection (task 7.9). */}
+                          <button
+                            type="button"
+                            className="info-button"
+                            aria-label={`Message info: ${pending.content}`}
+                            title="Message info"
+                            aria-expanded={
+                              inspectorOpen &&
+                              inspectedKey?.by === 'clientMessageId' &&
+                              inspectedKey.clientMessageId === pending.clientMessageId
+                            }
+                            aria-controls="inspector-panel"
+                            onClick={(event) =>
+                              onInspectMessage(
+                                { by: 'clientMessageId', clientMessageId: pending.clientMessageId },
+                                event.currentTarget,
+                              )
+                            }
+                          >
+                            <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+                              <circle cx="12" cy="12" r="9" />
+                              <path d="M12 11v5" />
+                              <path d="M12 7.6v.6" />
+                            </svg>
+                          </button>
+                        </div>
                         <span
                           className={
                             pending.status === 'failed'
