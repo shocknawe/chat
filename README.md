@@ -6,11 +6,10 @@ send: messages persist, arrive over a WebSocket, and survive a reload for both w
 
 ## Demo
 
-<video src="https://github.com/shocknawe/chat/raw/main/docs/screencap.mp4" controls muted width="720"></video>
+![Two browser windows exchanging messages in real time](docs/screencap.gif)
 
 Two windows, two seeded users, one conversation — messages land in both instantly and
-survive a reload. If the player above doesn't load, watch it here:
-[`docs/screencap.mp4`](docs/screencap.mp4).
+survive a reload. Full-resolution recording: [`docs/screencap.mp4`](docs/screencap.mp4).
 
 ## Stack
 
