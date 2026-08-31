@@ -877,16 +877,27 @@ describe("connection state surfaces (slice 5, tasks 6.2–6.4, 6.6–6.8)", () =
     expect(within(threadPane()).getByText("Sending…")).toBeInTheDocument();
   });
 
-  it("offers the DEV-only drop-connection control in a development build and delegates to the socket (task 6.5)", async () => {
+  it("offers the DEV-only test-reconnect control while connected and delegates to the socket (task 6.5)", async () => {
     const user = await renderSignedInOnConversation();
     const socket = captured[0]!;
+
+    // The control shows only while connected — it is a self-resetting reconnect
+    // test, so it hides itself the moment the connection drops.
+    connectSocket();
 
     // `import.meta.env.DEV` is true under the test environment; the
     // production build strips the control by the same flag's static
     // replacement (vite define + dead-code elimination).
-    expect(screen.getByRole("button", { name: "Drop connection" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Drop connection" }));
+    expect(screen.getByRole("button", { name: "Test reconnect" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Test reconnect" }));
     expect(socket.dropConnection).toHaveBeenCalledTimes(1);
+
+    // Dropping moves the socket off "connected", so the control hides until the
+    // reconnect completes.
+    act(() => {
+      socket.options.onStateChange?.("reconnecting");
+    });
+    expect(screen.queryByRole("button", { name: "Test reconnect" })).not.toBeInTheDocument();
   });
 });
 

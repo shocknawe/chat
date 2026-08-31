@@ -853,27 +853,34 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
               </svg>
             </button>
           )}
-          <span className="brand-mark brand-mark--sm" aria-hidden="true" />
+          <span className="brand-mark brand-mark--sm" aria-hidden="true">
+            <svg className="brand-mark-icon" viewBox="0 0 24 24">
+              <path d="M12 3.2c-5.1 0-9.2 3.2-9.2 7.2 0 2.2 1.3 4.2 3.3 5.6-.2 1.2-.9 2.5-2 3.7 2-.3 3.8-1.1 5.2-2.2.9.2 1.8.3 2.7.3 5.1 0 9.2-3.2 9.2-7.4S17.1 3.2 12 3.2Z" />
+            </svg>
+          </span>
           <span className="title">Chat</span>
         </div>
         <div className="app-header-user">
-          <ConnectionStatus state={connectionState} />
           {/* Slice 5 (task 6.5): the ONLY connection-severing control in the
               app, gated on `import.meta.env.DEV` so the control's string and
               click handler are stripped from production bundles (the spec:
               a production build contains no intentional-severing control).
               The gate deliberately wraps the CONTROL only — `dropConnection`
-              itself stays public on the socket and is exercised by tests. */}
-          {import.meta.env.DEV && (
+              itself stays public on the socket and is exercised by tests.
+              It sits LEFT of the connection indicator and hides itself while a
+              reconnect is in flight, so a single press reads as a self-resetting
+              "Test reconnect": drop → ~1s offline → reconnect → control returns. */}
+          {import.meta.env.DEV && connectionState === 'connected' && (
             <button
               type="button"
-              className="btn btn-ghost dev-drop-connection"
+              className="btn btn-ghost dev-test-reconnect"
               onClick={dropConnection}
-              title="Drop connection (demo)"
+              title="Test reconnect (demo)"
             >
-              Drop connection
+              Test reconnect
             </button>
           )}
+          <ConnectionStatus state={connectionState} />
           <button
             type="button"
             className="icon-button theme-toggle"
@@ -906,14 +913,28 @@ function SignedInShell({ user, onSwitchUser, announce }: SignedInShellProps) {
               </svg>
             )}
           </button>
-          <span className="chip">
+          <button
+            type="button"
+            className="user-chip"
+            onClick={onSwitchUser}
+            aria-haspopup="dialog"
+            aria-label={`Signed in as ${user.displayName}. Switch user`}
+            title="Switch user"
+          >
             <span className="avatar avatar--sm" aria-hidden="true">
               {initials(user.displayName)}
             </span>
-            {user.displayName}
-          </span>
-          <button type="button" className="btn btn-ghost" onClick={onSwitchUser}>
-            Switch user
+            <span className="user-chip-name">{user.displayName}</span>
+            <svg className="icon user-chip-caret" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="m7 10 5 5 5-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
         </div>
       </header>

@@ -146,6 +146,10 @@ export function useChatSocket(
   useEffect(() => {
     const socket = createChatSocket({
       userId,
+      // Hold a full second offline before the first reconnect attempt so a
+      // dropped connection (including the DEV "Test reconnect" control) shows a
+      // visible outage window rather than snapping straight back.
+      reconnect: { baseDelayMs: 1000 },
       // Every event arriving on this connection is associated with this hook's
       // `userId` — the identity validated at the handshake — and routed on.
       onEvent: (event) => dispatchRealtimeEvent(handlersRef.current, event),

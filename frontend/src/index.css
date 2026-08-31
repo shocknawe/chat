@@ -365,11 +365,19 @@ body[data-theme='dark'] .app-header {
 .brand-mark {
   width: 27px;
   height: 27px;
-  display: inline-block;
+  display: grid;
+  place-items: center;
   flex: none;
   border-radius: 9px;
   background: var(--brand-gradient);
   box-shadow: 0 7px 18px -9px rgba(60, 105, 200, 0.8);
+}
+
+.brand-mark-icon {
+  width: 60%;
+  height: 60%;
+  display: block;
+  fill: #fff;
 }
 
 .brand-mark--sm {
@@ -378,13 +386,14 @@ body[data-theme='dark'] .app-header {
   border-radius: 8px;
 }
 
-/* The signed-in identity chip in the header's user cluster. */
-.chip {
+/* The signed-in identity chip in the header's user cluster — the whole chip is
+   the "Switch user" control, with a caret hinting at the identity switcher. */
+.user-chip {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   min-height: 44px;
-  padding: 5px 12px 5px 6px;
+  padding: 5px 8px 5px 6px;
   color: var(--brand-ink);
   background: #f6edf8;
   border: 1px solid #dfc9e4;
@@ -392,12 +401,35 @@ body[data-theme='dark'] .app-header {
   font-size: 13px;
   font-weight: 800;
   white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    transform 0.18s var(--ease);
 }
 
-body[data-theme='dark'] .chip {
+.user-chip:hover {
+  background: #f1e2f5;
+  border-color: #cdaed3;
+  transform: translateY(-1px);
+}
+
+.user-chip-caret {
+  width: 16px;
+  height: 16px;
+  margin-left: 1px;
+  opacity: 0.72;
+}
+
+body[data-theme='dark'] .user-chip {
   color: #e2c9e9;
   background: #2c1c34;
   border-color: #5e3b68;
+}
+
+body[data-theme='dark'] .user-chip:hover {
+  background: #372343;
+  border-color: #7a4f88;
 }
 
 /* Icon-only controls: rail toggle, theme toggle, thread inspector control.
@@ -1060,7 +1092,7 @@ body[data-theme='dark'] .thread-scroll {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 14px;
 }
 
 /* Task 2.3: calendar-day dividers, hairline-flanked. */
@@ -1102,7 +1134,7 @@ body[data-theme='dark'] .thread-scroll {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 2px 2px;
+  margin: 0 0 6px 2px;
   color: var(--ink-2);
   font-size: 12px;
   font-weight: 800;
@@ -1279,11 +1311,6 @@ body[data-theme='dark'] .thread-scroll {
 
 .composer {
   flex: none;
-  min-height: 54px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 8px;
   padding: 10px 12px 12px;
   background: rgba(244, 249, 255, 0.94);
   border-top: 1px solid var(--line);
@@ -1293,32 +1320,48 @@ body[data-theme='dark'] .composer {
   background: rgba(18, 12, 31, 0.95);
 }
 
-.composer-input {
-  width: 100%;
-  /* `MAX_COMPOSER_HEIGHT_PX` in Composer.tsx mirrors this cap — the CSS is
-     the ultimate authority, the constant only avoids growing past it. */
-  max-height: 132px;
-  min-height: 44px;
-  padding: 10px 10px 8px;
-  color: var(--ink);
+/* The pill: textarea and send button share one bordered surface, echoing a
+   single message field rather than two adjacent controls. */
+.composer-box {
+  width: min(100%, 800px);
+  min-height: 54px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: end;
+  gap: 8px;
+  padding: 4px;
   background: var(--paper);
   border: 1px solid var(--line-strong);
   border-radius: 15px;
   box-shadow:
     inset 0 1px 3px rgba(42, 78, 122, 0.07),
     0 7px 24px -20px rgba(42, 78, 122, 0.7);
-  resize: none;
-  overflow-y: auto;
-  font-size: 14px;
-  line-height: 1.45;
   transition:
     border-color 0.18s var(--ease),
     box-shadow 0.18s var(--ease);
 }
 
-.composer-input:focus {
+.composer-box:focus-within {
   border-color: var(--brand);
   box-shadow: 0 0 0 4px rgba(152, 91, 156, 0.15);
+}
+
+.composer-input {
+  width: 100%;
+  /* `MAX_COMPOSER_HEIGHT_PX` in Composer.tsx mirrors this cap — the CSS is
+     the ultimate authority, the constant only avoids growing past it. */
+  max-height: 132px;
+  min-height: 44px;
+  padding: 10px 8px 8px 10px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  resize: none;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.45;
 }
 
 .composer-input::placeholder {
@@ -1334,15 +1377,15 @@ body[data-theme='dark'] .composer-input::placeholder {
    control). Disabled = submission unavailable (task 2.4): the button is
    greyed AND the submit path no-ops on a blank draft. */
 .composer-send {
-  min-height: 44px;
-  padding: 0 18px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   color: #fff;
   background: var(--brand-gradient);
   border: 1px solid transparent;
   border-radius: 12px;
-  font-size: 13px;
-  font-weight: 900;
-  white-space: nowrap;
   box-shadow: 0 9px 20px -12px rgba(60, 105, 200, 0.9);
   cursor: pointer;
   transition:
@@ -1365,6 +1408,16 @@ body[data-theme='dark'] .composer-input::placeholder {
   filter: grayscale(0.4);
   box-shadow: none;
   cursor: not-allowed;
+}
+
+/* Small print under the pill, mirroring the reference layout's right-aligned
+   keyboard-shortcut reminder. */
+.composer-hint {
+  width: min(100%, 800px);
+  margin: 5px auto 0;
+  color: var(--ink-3);
+  font-size: 11px;
+  text-align: right;
 }
 
 /* ── Identity gate (the 5.1 surface, re-skinned to the same system) ─── */
@@ -1834,6 +1887,12 @@ body[data-theme='dark'] .inspector-frame-json {
   flex-direction: row-reverse;
 }
 
+/* Breathing room between consecutive bubbles within one sender's run — they
+   otherwise stack flush against each other. */
+.message-item + .message-item {
+  margin-top: 5px;
+}
+
 .message-item .message-bubble {
   flex: 0 1 auto;
   min-width: 0;
@@ -1887,9 +1946,13 @@ body[data-theme='dark'] .inspector-frame-json {
   height: 16px;
 }
 
+/* On pointer devices the ⓘ stays hidden and is revealed only when the reader
+   hovers (or keyboard-focuses) the message. Touch devices have no hover, so the
+   glyph keeps its default visibility there. Focus-visible and the expanded
+   state below still force it fully visible, so keyboard users never lose it. */
 @media (hover: hover) {
   .info-button {
-    opacity: 0.55;
+    opacity: 0;
   }
 
   .message-item:hover .info-button {
@@ -1996,9 +2059,13 @@ body[data-theme='dark'] .thread-inspector-toggle[aria-expanded='true'] {
     gap: 5px;
   }
 
-  .chip {
+  .user-chip {
     padding-inline: 8px;
     font-size: 12px;
+  }
+
+  .user-chip-name {
+    display: none;
   }
 
   /* The rail leaves the layout grid and parks off-canvas. React still owns
@@ -2053,6 +2120,10 @@ body[data-theme='dark'] .thread-inspector-toggle[aria-expanded='true'] {
 
   .composer {
     padding: 8px;
+  }
+
+  .composer-hint {
+    display: none;
   }
 
   .connection-status-pill {

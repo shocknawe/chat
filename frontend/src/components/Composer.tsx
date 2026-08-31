@@ -26,6 +26,11 @@ const MAX_COMPOSER_HEIGHT_PX = 132
  * Composer (OpenSpec task 6.3, re-skinned under task 2.4) — the send
  * affordance below the thread.
  *
+ * Layout: the textarea and send button share one bordered pill
+ * (`.composer-box`) rather than sitting as two adjacent controls, with a
+ * small right-aligned keyboard hint (`.composer-hint`) underneath — matching
+ * the reference chat layout's composer.
+ *
  * Submission rules:
  * - Enter submits; Shift+Enter inserts a newline (standard chat semantics).
  * - Empty or whitespace-only drafts can never be submitted: the submit paths
@@ -66,6 +71,9 @@ interface ComposerProps {
 const WAITING_PLACEHOLDER = 'You can keep typing. Messages wait for the connection.'
 
 const DEFAULT_PLACEHOLDER = 'Write a message…'
+
+/** Hint line under the composer, mirroring the placeholder's connection-state split. */
+const DEFAULT_HINT = 'Enter sends. Shift and Enter adds a new line.'
 
 export function Composer({
   ariaLabel,
@@ -113,21 +121,39 @@ export function Composer({
   }
 
   return (
-    <form className="composer" onSubmit={handleFormSubmit}>
-      <textarea
-        ref={setTextareaRef}
-        className="composer-input"
-        aria-label={ariaLabel}
-        placeholder={waitingForConnection ? WAITING_PLACEHOLDER : DEFAULT_PLACEHOLDER}
-        rows={1}
-        maxLength={MAX_MESSAGE_LENGTH}
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={handleKeyDown}
-      />
-      <button type="submit" className="btn composer-send" disabled={!canSend}>
-        Send
-      </button>
-    </form>
+    <div className="composer">
+      <form className="composer-box" onSubmit={handleFormSubmit}>
+        <textarea
+          ref={setTextareaRef}
+          className="composer-input"
+          aria-label={ariaLabel}
+          placeholder={waitingForConnection ? WAITING_PLACEHOLDER : DEFAULT_PLACEHOLDER}
+          rows={1}
+          maxLength={MAX_MESSAGE_LENGTH}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+        <button
+          type="submit"
+          className="btn composer-send"
+          disabled={!canSend}
+          aria-label="Send"
+          title="Send"
+        >
+          <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M21 3 10 14M21 3l-7 18-4-7-7-4 18-7Z"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      </form>
+      <p className="composer-hint">{DEFAULT_HINT}</p>
+    </div>
   )
 }

@@ -441,9 +441,6 @@ export function ThreadPane({
                       >
                         {!isOwn && (
                           <span className="message-sender">
-                            <span className="avatar avatar--sm" aria-hidden="true">
-                              {initials(senderName)}
-                            </span>
                             <span className="message-sender-name">{senderName}</span>
                           </span>
                         )}
