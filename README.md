@@ -4,6 +4,14 @@ A working, fully local real-time 1-to-1 messaging app — "a simple web-based Wh
 or Telegram." Pick a seeded demo identity, open a conversation with another user, and
 send: messages persist, arrive over a WebSocket, and survive a reload for both windows.
 
+## Demo
+
+<video src="https://github.com/shocknawe/chat/raw/main/docs/screencap.mp4" controls muted width="720"></video>
+
+Two windows, two seeded users, one conversation — messages land in both instantly and
+survive a reload. If the player above doesn't load, watch it here:
+[`docs/screencap.mp4`](docs/screencap.mp4).
+
 ## Stack
 
 - **Frontend** — React + TypeScript (Vite), [TanStack Query](https://tanstack.com/query)
