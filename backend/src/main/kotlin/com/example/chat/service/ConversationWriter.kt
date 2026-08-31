@@ -33,6 +33,7 @@ private fun Message.toDto(): MessageDto = MessageDto(
     id = id,
     conversationId = conversation.id,
     senderId = sender.id,
+    clientMessageId = clientMessageId,
     content = content,
     createdAt = createdAt,
 )

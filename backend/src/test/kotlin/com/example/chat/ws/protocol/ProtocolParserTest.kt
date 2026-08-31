@@ -103,16 +103,24 @@ class ProtocolParserTest {
             id = UUID.randomUUID(),
             conversationId = UUID.randomUUID(),
             senderId = UUID.randomUUID(),
+            clientMessageId = UUID.randomUUID(),
             content = "hi",
             createdAt = Instant.now(),
         )
-        val event: OutboundEvent = MessageAck(clientMessageId = UUID.randomUUID(), message = message)
+        val event: OutboundEvent = MessageAck(clientMessageId = message.clientMessageId, message = message)
 
         val json = objectMapper.writeValueAsString(event)
         val tree = objectMapper.readTree(json)
 
         assertThat(tree.get("type").asText()).isEqualTo("MESSAGE_ACK")
         assertThat(tree.get("message").get("id").asText()).isEqualTo(message.id.toString())
+        // The token appears at both levels: on the message itself (since the
+        // deliberate-omission reversal) and redundantly at the event level for
+        // consumers that correlate on it (docs/openapi.yaml, MESSAGE_ACK).
+        assertThat(tree.get("message").get("clientMessageId").asText())
+            .isEqualTo(message.clientMessageId.toString())
+        assertThat(tree.get("clientMessageId").asText())
+            .isEqualTo(tree.get("message").get("clientMessageId").asText())
     }
 
     @Test
@@ -121,6 +129,7 @@ class ProtocolParserTest {
             id = UUID.randomUUID(),
             conversationId = UUID.randomUUID(),
             senderId = UUID.randomUUID(),
+            clientMessageId = UUID.randomUUID(),
             content = "hi",
             createdAt = Instant.now(),
         )
@@ -129,7 +138,11 @@ class ProtocolParserTest {
         val tree = objectMapper.readTree(objectMapper.writeValueAsString(event))
 
         assertThat(tree.get("type").asText()).isEqualTo("NEW_MESSAGE")
+        // The token lives on the message itself (present even when another
+        // participant sent it), never at the NEW_MESSAGE event level.
         assertThat(tree.has("clientMessageId")).isFalse()
+        assertThat(tree.get("message").get("clientMessageId").asText())
+            .isEqualTo(message.clientMessageId.toString())
     }
 
     @Test

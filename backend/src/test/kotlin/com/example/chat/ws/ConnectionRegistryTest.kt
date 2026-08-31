@@ -42,6 +42,7 @@ class ConnectionRegistryTest {
         id = UUID.randomUUID(),
         conversationId = UUID.randomUUID(),
         senderId = userId,
+        clientMessageId = UUID.randomUUID(),
         content = "hi",
         createdAt = Instant.now(),
     )

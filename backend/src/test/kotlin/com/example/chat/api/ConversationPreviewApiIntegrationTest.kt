@@ -209,6 +209,7 @@ class ConversationPreviewApiIntegrationTest {
         assertThat(preview.get("createdAt").asText()).isEqualTo(historyTail.get("createdAt").asText())
         assertThat(preview.get("senderId").asText()).isEqualTo(historyTail.get("senderId").asText())
         assertThat(preview.get("conversationId").asText()).isEqualTo(conversation.id.toString())
+        assertThat(preview.get("clientMessageId").asText()).isEqualTo(historyTail.get("clientMessageId").asText())
     }
 
     // --- Task 4.0: the empty-history wire form, identical everywhere ---

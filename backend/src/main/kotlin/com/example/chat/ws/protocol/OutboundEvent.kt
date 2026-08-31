@@ -12,21 +12,20 @@ import java.util.UUID
  * (design.md: "Explicit protocol modelled as sealed Kotlin types").
  *
  * Three of the events reuse the authoritative REST [MessageDto] shape
- * (`{ id, conversationId, senderId, content, createdAt }`); `CONVERSATION_CREATED`
- * instead carries the REST [ConversationDto], for the same reason — the
- * entity the event announces is the same one the listing returns. `clientMessageId`
- * was originally carried alongside it only in [MessageAck] and [ErrorEvent]
- * as a correlation token, never inside the message payload itself
- * (design.md, the DTO shape note). **That omission is reversed**
- * (`add-conversation-creation-presence-inspector` design.md decision 6): the
- * token is planned to move onto [MessageDto] itself, so every event carrying
- * a message — including `NEW_MESSAGE` for a message sent by another
- * participant — exposes it honestly. [MessageAck.clientMessageId] and
+ * (`{ id, conversationId, senderId, clientMessageId, content, createdAt }`);
+ * `CONVERSATION_CREATED` instead carries the REST [ConversationDto], for the
+ * same reason — the entity the event announces is the same one the listing
+ * returns. `clientMessageId` was originally carried alongside the message
+ * only in [MessageAck] and [ErrorEvent] as a correlation token, never inside
+ * the message payload itself (design.md, the DTO shape note). **That omission
+ * is reversed** (`add-conversation-creation-presence-inspector` design.md
+ * decision 6): the token lives on [MessageDto] itself, so every event
+ * carrying a message — including `NEW_MESSAGE` for a message sent by another
+ * participant — exposes it honestly. It remains per-sender-scoped and
+ * non-authoritative (see [MessageDto]). [MessageAck.clientMessageId] and
  * [ErrorEvent.clientMessageId] remain at the event level for existing
- * consumers that correlate on them (redundant with `message.clientMessageId`
- * on `MessageAck` once that field exists). Exposure is **planned but not yet
- * implemented** — [MessageDto] does not yet declare the field (Slice 0 of
- * that change is contract/documentation only; adding the field is Slice 6).
+ * consumers that correlate on them — on `MESSAGE_ACK` this is redundant with
+ * `message.clientMessageId`, retained for compatibility.
  *
  * [Presence] is the one event that reuses no REST shape at all: online
  * presence exists only in the live connection registry, and its payload is a
@@ -47,6 +46,12 @@ sealed interface OutboundEvent
  * transaction has committed (design.md: "Commit before acknowledgement or
  * fan-out"). [message] is the authoritative message: server-generated [id]
  * and `createdAt`, never the client-supplied identifiers.
+ *
+ * [clientMessageId] at the event level is redundant with
+ * `message.clientMessageId` — both equal the token the originating command
+ * carried. It is retained (and stays required on the wire) because existing
+ * consumers correlate on it (`docs/openapi.yaml`, the `serverToClient`
+ * events description).
  */
 data class MessageAck(
     val clientMessageId: UUID,

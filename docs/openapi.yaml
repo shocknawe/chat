@@ -539,7 +539,6 @@ components:
           type: string
           format: uuid
         clientMessageId:
-          x-status: planned
           type: string
           format: uuid
           description: |

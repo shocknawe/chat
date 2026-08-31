@@ -51,6 +51,7 @@ class MessageCommandHandlerFanOutUnitTest {
         id = UUID.randomUUID(),
         conversationId = command.conversationId,
         senderId = sender.id,
+        clientMessageId = command.clientMessageId,
         content = command.content,
         createdAt = Instant.now(),
     )

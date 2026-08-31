@@ -85,7 +85,7 @@ is never cut (slices 2–4 depend on it to be demonstrable).
 
 ## 7. Slice 6 — Info drawer and correlation token
 
-- [ ] 7.1 Add `clientMessageId` to the `Message` DTO in REST history and in `NEW_MESSAGE`/`MESSAGE_ACK` payloads. Keep `MessageAck.clientMessageId` at the event level (existing consumers correlate on it) and document in `docs/openapi.yaml` that for `MESSAGE_ACK` it is redundant with `message.clientMessageId`, retained for compatibility
+- [x] 7.1 Add `clientMessageId` to the `Message` DTO in REST history and in `NEW_MESSAGE`/`MESSAGE_ACK` payloads. Keep `MessageAck.clientMessageId` at the event level (existing consumers correlate on it) and document in `docs/openapi.yaml` that for `MESSAGE_ACK` it is redundant with `message.clientMessageId`, retained for compatibility
 - [ ] 7.2 Add the `onCommandSent` instrumentation hook and the bounded session-scoped transport ledger (discard oldest first)
 - [ ] 7.3 Define the `InspectTarget` union (message vs connection/protocol view)
 - [ ] 7.4 Add the per-message ⓘ affordance (including own pending messages) and the thread-header inspector control; expose expanded state; distinguish the inspected message

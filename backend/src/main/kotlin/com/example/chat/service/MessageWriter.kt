@@ -86,6 +86,7 @@ internal fun Message.toMessageDto(): MessageDto = MessageDto(
     id = id,
     conversationId = conversation.id,
     senderId = sender.id,
+    clientMessageId = clientMessageId,
     content = content,
     createdAt = createdAt,
 )
